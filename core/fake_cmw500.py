@@ -28,6 +28,30 @@ class FakeCMW500:
         self.channel = channel
         time.sleep(0.02)
 
+    def lte_prepare_cell(
+        self,
+        band: str,
+        channel: int,
+        channel_type: str = "",
+        test_mode: str = "",
+    ) -> None:
+        self.setup_lte(band, channel)
+
+    def lte_cell_on(
+        self,
+        band: str,
+        channel: int,
+        channel_type: str = "",
+        test_mode: str = "",
+    ) -> None:
+        return None
+
+    def wait_for_attach(self, timeout: float | None = None) -> bool:
+        return True
+
+    def lte_before_measure(self) -> None:
+        return None
+
     def set_rx_level(self, level: float) -> None:
         self.rx_level = level
         time.sleep(0.01)
@@ -41,3 +65,12 @@ class FakeCMW500:
         else:
             bler = random.uniform(10, 40)
         return round(bler, 2)
+
+    def lte_after_measure(self) -> None:
+        return None
+
+    def lte_cell_off(self) -> None:
+        return None
+
+    def lte_cleanup(self) -> None:
+        return None

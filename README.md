@@ -16,6 +16,7 @@ CMW500 手机灵敏度自动化测试工具 UI 原型。
 - 支持加载串口配置文件，格式为 YAML 或 JSON。
 - 支持仪表模式切换：Fake CMW500 与 Real CMW500 TCP Socket/SCPI 连接。
 - 支持 CMW500 LTE SCPI 命令模板配置，让 RealCMW500 从 YAML/JSON 模板执行 LTE setup、RX Level 设置和 BLER 查询。
+- 支持 LTE 测试流程状态机：小区配置、Cell ON、等待 UE Attach、测量、Cell OFF、Cleanup。
 
 ## 运行方式
 
@@ -48,7 +49,7 @@ adb devices
 
 ## 当前版本说明
 
-当前版本为 Phase 7，在原有 UI 原型、FakeCMW500 测试闭环、信道配置、结果导出、手机控制和 CMW500 Socket/SCPI 通信层基础上增加了可配置 SCPI 命令模板执行框架：
+当前版本为 Phase 8，在原有 UI 原型、FakeCMW500 测试闭环、信道配置、结果导出、手机控制和 CMW500 Socket/SCPI 通信层基础上增加了 LTE 测试流程状态机：
 
 - `MainWindow(QMainWindow)` 作为主窗口。
 - `LeftPanel`、`CenterPanel`、`RightPanel` 通过 `QSplitter(Qt.Horizontal)` 组成三栏布局。
@@ -65,6 +66,7 @@ adb devices
 - `devices/cmw500_controller.py` 提供 `RealCMW500` 控制器，支持 TCP 连接、断开、`*IDN?` 查询、`*RST` 和 `SYST:PRES` 基础命令。
 - `core/fake_cmw500.py` 保持默认可用回退模式，并兼容统一仪表接口。
 - `core/scpi_template.py` 解析 CMW500 LTE SCPI 命令模板，并支持模板变量渲染和测量返回值解析。
+- `core/test_states.py` 定义 LTE 测试流程状态，`core/test_worker.py` 按状态机推进测试。
 
 ## 仪表连接说明
 
@@ -87,20 +89,26 @@ Fake CMW500 Simulator
 - `*RST` reset 基础命令
 - `SYST:PRES` preset 基础命令
 
-当前 Real CMW500 尚未完成：
+当前 Real CMW500 仍需按实际仪表继续校准：
 
 - LTE 小区真实配置 SCPI
 - RX Level 真实设置 SCPI
 - BLER 真实读取 SCPI
 
-加载 CMW500 命令模板后，Real 模式会按模板执行 LTE setup、RX Level 设置和 BLER 查询；未加载模板或模板执行失败且允许回退时，会使用模拟 BLER，并在日志中输出 WARNING。后续需要根据实际 CMW500 选件和测试应用补充并校准 LTE/BLER 相关 SCPI 命令。
+加载 CMW500 命令模板后，Real 模式会按模板执行 LTE setup、Cell ON、等待 UE Attach、RX Level 设置、BLER 查询、Cell OFF 和 Cleanup；未加载 `wait_attach` 时不会假装 Attach 成功。Fake 模式会自动 Attach 成功，作为默认可用回退。
 
 ## SCPI 命令模板
 
-Phase 7 实现的是 CMW500 LTE SCPI 命令模板执行框架。示例模板位于：
+Phase 8 实现的是 CMW500 LTE SCPI 命令模板和流程状态机执行框架。基础示例模板位于：
 
 ```text
 config/cmw500_lte_scpi_template.example.yaml
+```
+
+Phase 8 流程示例模板位于：
+
+```text
+config/cmw500_lte_scpi_template.phase8.example.yaml
 ```
 
 示例内容：
@@ -116,12 +124,27 @@ lte:
     - "INST LTE"
     - "CONFigure:LTE:SIGN:BAND {band_number}"
     - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
+  cell_on:
+    - "CALL:LTE:SIGN:PSWitched:STATe ON"
+  wait_attach:
+    query: "FETCh:LTE:SIGN:PSWitched:STATe?"
+    parser: "contains"
+    expected: "ATT"
+    interval_sec: 1.0
+    timeout_sec: 30.0
+    fallback_success: false
+  before_measure:
+    - "SYST:ERR?"
   set_rx_level:
     - "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
   measure_bler:
     query: "FETCh:LTE:SIGN:BLER?"
     parser: "first_float"
     fallback_simulation: true
+  after_measure:
+    - "SYST:ERR?"
+  cell_off:
+    - "CALL:LTE:SIGN:PSWitched:STATe OFF"
   cleanup:
     - "SYST:ERR?"
 ```
@@ -143,7 +166,36 @@ lte:
 - `second_float`：提取返回字符串中的第二个浮点数
 - `csv_index:N`：按逗号分隔后取第 N 个字段，N 从 0 开始
 
-`fallback_simulation` 为 `true` 时，如果真实 BLER 查询或解析失败，RealCMW500 会回退模拟 BLER，并在日志中输出 WARNING。示例命令只用于说明模板格式，不保证适配所有 CMW500；真实 LTE attach、信令建立、RX Level 设置和 BLER 读取流程需要根据仪表选件、应用模式和官方手册继续补充。
+`wait_attach` parser：
+
+- `contains`：返回字符串包含 `expected` 即成功
+- `equals`：返回字符串去除首尾空白后等于 `expected` 即成功
+- `first_float_ge:X`：返回字符串中的第一个浮点数大于等于 X 即成功
+- `first_float_le:X`：返回字符串中的第一个浮点数小于等于 X 即成功
+- `regex`：把 `expected` 当作正则表达式，匹配成功即成功
+
+LTE 状态机状态：
+
+- `IDLE`
+- `PREPARING`
+- `CELL_CONFIGURING`
+- `CELL_ON`
+- `WAITING_ATTACH`
+- `ATTACHED`
+- `MEASURING`
+- `PAUSED`
+- `STOPPING`
+- `CLEANUP`
+- `COMPLETED`
+- `FAILED`
+
+流程顺序：
+
+```text
+PREPARING -> CELL_CONFIGURING -> CELL_ON -> WAITING_ATTACH -> ATTACHED -> MEASURING -> CLEANUP -> COMPLETED
+```
+
+测试计划按 Band/Channel 重建小区，同一个 Band/Channel 下只扫不同 RX Level；切换 Band/Channel 时重新执行 setup、cell_on 和 wait_attach。`fallback_simulation` 为 `true` 时，如果真实 BLER 查询或解析失败，RealCMW500 会回退模拟 BLER，并在日志中输出 WARNING。示例命令只用于说明模板格式，不保证适配所有 CMW500；真实 LTE attach、信令建立、数据业务、PTM/DAU 或 BLER 读取流程需要根据仪表选件、应用模式和官方手册继续补充。用户可以直接修改 YAML/JSON 模板，而不是修改 Python 代码。
 
 生成示例信道配置：
 

@@ -1,0 +1,41 @@
+instrument:
+  name: CMW500
+  transport: socket
+  default_port: 5025
+
+lte:
+  setup:
+    - "INST LTE"
+    - "CONFigure:LTE:SIGN:BAND {band_number}"
+    - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
+
+  cell_on:
+    - "CALL:LTE:SIGN:PSWitched:STATe ON"
+
+  wait_attach:
+    query: "FETCh:LTE:SIGN:PSWitched:STATe?"
+    parser: "contains"
+    expected: "ATT"
+    interval_sec: 1.0
+    timeout_sec: 30.0
+    fallback_success: false
+
+  before_measure:
+    - "SYST:ERR?"
+
+  set_rx_level:
+    - "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
+
+  measure_bler:
+    query: "FETCh:LTE:SIGN:BLER?"
+    parser: "first_float"
+    fallback_simulation: true
+
+  after_measure:
+    - "SYST:ERR?"
+
+  cell_off:
+    - "CALL:LTE:SIGN:PSWitched:STATe OFF"
+
+  cleanup:
+    - "SYST:ERR?"

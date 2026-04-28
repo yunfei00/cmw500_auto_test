@@ -602,6 +602,14 @@ class LeftPanel(QScrollArea):
 
         self._log("INFO", f"已加载 CMW500 命令配置文件：{config_path}")
         self._log("INFO", f"LTE setup 命令数：{len(template.setup)}")
+        self._log("INFO", f"LTE cell_on 命令数：{len(template.cell_on)}")
+        if template.wait_attach:
+            self._log(
+                "INFO",
+                f"LTE wait_attach parser：{template.wait_attach.parser}，timeout：{template.wait_attach.timeout_sec:g}s",
+            )
+        else:
+            self._log("WARNING", "LTE wait_attach 未配置，Real 模式无法确认 UE Attach")
         self._log("INFO", f"LTE set_rx_level 命令数：{len(template.set_rx_level)}")
         self._log("INFO", f"LTE measure_bler parser：{template.measure_bler.parser}")
 
@@ -815,7 +823,7 @@ class LeftPanel(QScrollArea):
             if self.scpi_template_manager and self.scpi_template_manager.has_template():
                 self._log("INFO", "使用 CMW500 SCPI 模板执行 LTE 测试")
             else:
-                self._log("WARNING", "未加载 CMW500 命令配置文件，RealCMW500 将仅连接仪表但 BLER 使用模拟值")
+                self._log("WARNING", "未加载 CMW500 命令配置文件，RealCMW500 无法确认 UE Attach 状态")
         self._log("INFO", "开始测试")
         self.worker_thread.start()
 

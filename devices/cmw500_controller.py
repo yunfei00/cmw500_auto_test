@@ -28,6 +28,7 @@ class RealCMW500(InstrumentBase):
         self.current_test_mode = ""
         self.current_rx_level = -70.0
         self.last_warning = ""
+        self.last_attach_response = ""
         self.last_commands: list[str] = []
 
     def connect(self) -> None:
@@ -57,7 +58,27 @@ class RealCMW500(InstrumentBase):
     def set_scpi_template_manager(self, manager: ScpiTemplateManager | None) -> None:
         self.scpi_template_manager = manager
 
-    def setup_lte(
+    def execute_template_commands(
+        self,
+        commands: list[str],
+        context: dict,
+        stage: str = "",
+    ) -> None:
+        if not commands:
+            return
+        if not self.scpi_template_manager:
+            raise RuntimeError("未加载 SCPI 模板管理器")
+
+        for raw_command in commands:
+            command = self.scpi_template_manager.render_command(raw_command, context)
+            try:
+                self.write(command)
+                self.last_commands.append(command)
+            except Exception as exc:
+                stage_text = f"{stage} " if stage else ""
+                raise RuntimeError(f"{stage_text}SCPI 命令执行失败：{command}，{exc}") from exc
+
+    def lte_prepare_cell(
         self,
         band: str,
         channel: int,
@@ -70,19 +91,155 @@ class RealCMW500(InstrumentBase):
         self.current_test_mode = test_mode
         template = self._lte_template()
         if not template:
-            self.last_warning = "未加载 SCPI 模板，setup_lte 仅保存状态"
+            self.last_warning = "未加载 LTE SCPI 模板，lte_prepare_cell 未发送真实命令"
             return
 
-        context = self._build_context(
-            band=band,
-            channel=channel,
-            channel_type=channel_type,
-            test_mode=test_mode,
+        self.execute_template_commands(
+            template.setup,
+            self._build_context(
+                band=band,
+                channel=channel,
+                channel_type=channel_type,
+                test_mode=test_mode,
+            ),
+            "lte_prepare_cell",
         )
-        for raw_command in template.setup:
-            command = self.scpi_template_manager.render_command(raw_command, context)
-            self.write(command)
-            self.last_commands.append(command)
+
+    def lte_cell_on(
+        self,
+        band: str,
+        channel: int,
+        channel_type: str = "",
+        test_mode: str = "",
+    ) -> None:
+        self.current_band = band
+        self.current_channel = channel
+        self.current_channel_type = channel_type
+        self.current_test_mode = test_mode
+        template = self._lte_template()
+        if not template:
+            self.last_warning = "未加载 LTE SCPI 模板，lte_cell_on 未发送真实命令"
+            return
+        if not template.cell_on:
+            self.last_warning = "LTE SCPI 模板未配置 cell_on，已跳过 Cell ON"
+            return
+
+        self.execute_template_commands(
+            template.cell_on,
+            self._build_context(
+                band=band,
+                channel=channel,
+                channel_type=channel_type,
+                test_mode=test_mode,
+            ),
+            "lte_cell_on",
+        )
+
+    def wait_for_attach(self, timeout: float | None = None) -> bool:
+        template = self._lte_template()
+        if not template or not template.wait_attach:
+            self.last_warning = "未配置 wait_attach 模板，无法确认 UE Attach 状态"
+            return False
+        if not self.scpi_template_manager:
+            self.last_warning = "未加载 SCPI 模板管理器，无法等待 UE Attach"
+            return False
+
+        wait_config = template.wait_attach
+        timeout_sec = timeout if timeout is not None else wait_config.timeout_sec
+        timeout_sec = max(float(timeout_sec), 0.0)
+        interval_sec = max(float(wait_config.interval_sec), 0.05)
+        deadline = time.monotonic() + timeout_sec
+        context = self._build_context(
+            band=self.current_band,
+            channel=self.current_channel,
+            rx_level=self.current_rx_level,
+            channel_type=self.current_channel_type,
+            test_mode=self.current_test_mode,
+        )
+
+        while True:
+            try:
+                command = self.scpi_template_manager.render_command(wait_config.query, context)
+                response = self.query(command)
+                self.last_commands.append(command)
+                self.last_attach_response = response
+                if self.scpi_template_manager.parse_wait_response(
+                    response,
+                    wait_config.parser,
+                    wait_config.expected,
+                ):
+                    return True
+            except Exception as exc:
+                self.last_warning = f"wait_attach 查询异常：{exc}"
+                if wait_config.fallback_success:
+                    self.last_warning = f"{self.last_warning}，已按 fallback_success 继续"
+                    return True
+
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(min(interval_sec, max(deadline - time.monotonic(), 0.0)))
+
+        if wait_config.fallback_success:
+            self.last_warning = "wait_attach 超时，已按 fallback_success 继续"
+            return True
+        self.last_warning = f"wait_attach 超时，最后响应：{self.last_attach_response or '-'}"
+        return False
+
+    def lte_before_measure(self) -> None:
+        template = self._lte_template()
+        if not template:
+            return
+        self.execute_template_commands(
+            template.before_measure,
+            self._build_context(self.current_band, self.current_channel),
+            "lte_before_measure",
+        )
+
+    def lte_after_measure(self) -> None:
+        template = self._lte_template()
+        if not template:
+            return
+        self.execute_template_commands(
+            template.after_measure,
+            self._build_context(self.current_band, self.current_channel),
+            "lte_after_measure",
+        )
+
+    def lte_cell_off(self) -> None:
+        template = self._lte_template()
+        if not template:
+            self.last_warning = "未加载 LTE SCPI 模板，lte_cell_off 未发送真实命令"
+            return
+        if not template.cell_off:
+            self.last_warning = "LTE SCPI 模板未配置 cell_off，已跳过 Cell OFF"
+            return
+        self.execute_template_commands(
+            template.cell_off,
+            self._build_context(self.current_band, self.current_channel),
+            "lte_cell_off",
+        )
+
+    def lte_cleanup(self) -> None:
+        template = self._lte_template()
+        if not template:
+            return
+        try:
+            self.execute_template_commands(
+                template.cleanup,
+                self._build_context(self.current_band, self.current_channel),
+                "lte_cleanup",
+            )
+        except Exception as exc:
+            self.last_warning = f"Cleanup 执行异常，已忽略：{exc}"
+
+    def setup_lte(
+        self,
+        band: str,
+        channel: int,
+        channel_type: str = "",
+        test_mode: str = "",
+    ) -> None:
+        self.lte_prepare_cell(band, channel, channel_type, test_mode)
 
     def set_rx_level(self, level: float) -> None:
         self.current_rx_level = level
@@ -98,10 +255,7 @@ class RealCMW500(InstrumentBase):
             channel_type=self.current_channel_type,
             test_mode=self.current_test_mode,
         )
-        for raw_command in template.set_rx_level:
-            command = self.scpi_template_manager.render_command(raw_command, context)
-            self.write(command)
-            self.last_commands.append(command)
+        self.execute_template_commands(template.set_rx_level, context, "set_rx_level")
 
     def measure_bler(self, packet_count: int) -> float:
         template = self._lte_template()
