@@ -26,7 +26,9 @@ from PySide6.QtWidgets import (
 
 from core.channel_config import ChannelConfigManager
 from core.models import LteTestConfig
+from core.serial_config import SerialConfigManager
 from core.test_worker import TestWorker
+from devices.adb_client import AdbClient
 
 
 LogCallback = Callable[[str, str], None]
@@ -47,6 +49,8 @@ class LeftPanel(QScrollArea):
         self.worker_thread: QThread | None = None
         self.worker: TestWorker | None = None
         self.channel_manager = ChannelConfigManager()
+        self.serial_config_manager = SerialConfigManager()
+        self.adb_client = AdbClient()
         self._test_running = False
         self.band_checkboxes: dict[int, QCheckBox] = {}
         self.channel_type_checkboxes: dict[str, QCheckBox] = {}
@@ -355,16 +359,16 @@ class LeftPanel(QScrollArea):
 
         button_grid = QGridLayout()
         actions = [
-            ("刷新设备", "刷新设备"),
-            ("重启", "重启设备"),
-            ("停止App", "停止App"),
-            ("启动App", "启动App"),
-            ("清除数据", "清除数据"),
-            ("截图", "截图"),
+            ("刷新设备", self._refresh_devices),
+            ("重启", self._adb_reboot),
+            ("停止App", self._adb_stop_app),
+            ("启动App", self._adb_start_app),
+            ("清除数据", self._adb_clear_app_data),
+            ("截图", self._adb_screenshot),
         ]
-        for index, (button_text, action_text) in enumerate(actions):
+        for index, (button_text, handler) in enumerate(actions):
             button = QPushButton(button_text)
-            button.clicked.connect(lambda checked=False, text=action_text: self._adb_action(text))
+            button.clicked.connect(lambda checked=False, action=handler: action())
             button_grid.addWidget(button, index // 3, index % 3)
 
         layout.addLayout(package_layout)
@@ -424,6 +428,13 @@ class LeftPanel(QScrollArea):
                 "",
                 "Excel 工作簿 (*.xlsx);;所有文件 (*.*)",
             )
+        elif label_text == "串口配置文件":
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择串口配置文件",
+                "",
+                "串口配置文件 (*.yaml *.yml *.json);;所有文件 (*.*)",
+            )
         else:
             path, _ = QFileDialog.getOpenFileName(
                 self,
@@ -437,6 +448,9 @@ class LeftPanel(QScrollArea):
     def _load_config_file(self, label_text: str, path: str) -> None:
         if label_text == "信道配置文件":
             self._load_channel_config_file(path)
+            return
+        if label_text == "串口配置文件":
+            self._load_serial_config_file(path)
             return
         display_path = path.strip() or "未选择文件"
         self._log("INFO", f"已加载 {label_text} 配置文件：{display_path}")
@@ -460,10 +474,32 @@ class LeftPanel(QScrollArea):
         if checked_bands:
             self._log("INFO", f"已自动勾选 LTE Band：{', '.join(checked_bands)}")
 
+    def _load_serial_config_file(self, path: str) -> None:
+        config_path = path.strip()
+        if not config_path:
+            self._log("ERROR", "请选择串口配置文件")
+            return
+
+        try:
+            self.serial_config_manager.load_file(config_path)
+        except Exception as exc:
+            self._log("ERROR", f"串口配置文件加载失败：{exc}")
+            return
+
+        port_count = len(self.serial_config_manager.get_ports())
+        self._log("INFO", f"已加载串口配置文件：{config_path}")
+        self._log("INFO", f"共加载 {port_count} 个串口配置")
+
     def _refresh_devices(self) -> None:
+        devices = self.adb_client.list_devices()
         self.device_combo.clear()
-        self.device_combo.addItems(["device_001", "device_002"])
-        self._log("INFO", "已刷新设备列表：device_001, device_002")
+        self.device_combo.addItems(devices)
+        if devices:
+            self._log("INFO", f"检测到 {len(devices)} 台设备")
+        elif self.adb_client.last_error:
+            self._log("ERROR", self.adb_client.last_error)
+        else:
+            self._log("WARNING", "未检测到 ADB 设备")
 
     def _browse_app(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择 App 安装包", "", "Android Package (*.apk);;所有文件 (*.*)")
@@ -471,8 +507,18 @@ class LeftPanel(QScrollArea):
             self.app_path_edit.setText(path)
 
     def _install_app(self) -> None:
-        app_path = self.app_path_edit.text().strip() or "未选择 App"
+        device_id = self._current_device_id()
+        if not device_id:
+            return
+
+        app_path = self.app_path_edit.text().strip()
+        if not app_path:
+            self._log("ERROR", "请先选择 APK 文件")
+            return
+
         self._log("INFO", f"开始安装 App：{app_path}")
+        success, message = self.adb_client.install_app(device_id, app_path)
+        self._log_adb_result(success, "安装 App", message)
 
     def _current_test_mode(self) -> str:
         checked = self.mode_group.checkedButton()
@@ -555,8 +601,43 @@ class LeftPanel(QScrollArea):
         self.worker.stop()
         self._log("INFO", "请求停止测试")
 
-    def _adb_action(self, action_text: str) -> None:
-        self._log("INFO", f"执行ADB操作：{action_text}")
+    def _adb_reboot(self) -> None:
+        device_id = self._current_device_id()
+        if not device_id:
+            return
+        success, message = self.adb_client.reboot(device_id)
+        self._log_adb_result(success, "重启设备", message)
+
+    def _adb_stop_app(self) -> None:
+        device_id = self._current_device_id()
+        package_name = self._package_name()
+        if not device_id or not package_name:
+            return
+        success, message = self.adb_client.stop_app(device_id, package_name)
+        self._log_adb_result(success, "停止App", message)
+
+    def _adb_start_app(self) -> None:
+        device_id = self._current_device_id()
+        package_name = self._package_name()
+        if not device_id or not package_name:
+            return
+        success, message = self.adb_client.start_app(device_id, package_name)
+        self._log_adb_result(success, "启动App", message)
+
+    def _adb_clear_app_data(self) -> None:
+        device_id = self._current_device_id()
+        package_name = self._package_name()
+        if not device_id or not package_name:
+            return
+        success, message = self.adb_client.clear_app_data(device_id, package_name)
+        self._log_adb_result(success, "清除数据", message)
+
+    def _adb_screenshot(self) -> None:
+        device_id = self._current_device_id()
+        if not device_id:
+            return
+        success, message = self.adb_client.screenshot(device_id, "data/screenshots")
+        self._log_adb_result(success, "截图", message)
 
     def on_test_finished(self) -> None:
         self._restore_test_buttons()
@@ -611,3 +692,20 @@ class LeftPanel(QScrollArea):
                 checkbox.setChecked(True)
                 checked_bands.append(band)
         return checked_bands
+
+    def _current_device_id(self) -> str:
+        device_id = self.device_combo.currentText().strip()
+        if not device_id:
+            self._log("ERROR", "请先选择设备序列号")
+        return device_id
+
+    def _package_name(self) -> str:
+        package_name = self.package_name_edit.text().strip()
+        if not package_name:
+            self._log("ERROR", "请先填写 App 包名")
+        return package_name
+
+    def _log_adb_result(self, success: bool, action_text: str, message: str) -> None:
+        level = "INFO" if success else "ERROR"
+        output = message.strip() if message else "命令执行成功"
+        self._log(level, f"执行ADB操作：{action_text}，{output}")

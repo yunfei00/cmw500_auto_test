@@ -12,6 +12,8 @@ CMW500 手机灵敏度自动化测试工具 UI 原型。
 - 支持测试暂停、继续、停止，测试结束后自动恢复按钮状态。
 - 支持 LTE 测试结果汇总、灵敏度点计算，以及 RawResults/Summary 双 Sheet Excel 导出。
 - 支持加载 LTE 信道配置 Excel，并优先使用 Excel 中的 Band/频点/信道映射生成测试计划。
+- 支持基础 ADB 手机控制：刷新设备、安装 App、重启、停止/启动 App、清除数据、截图。
+- 支持加载串口配置文件，格式为 YAML 或 JSON。
 
 ## 运行方式
 
@@ -25,6 +27,7 @@ python main.py
 - Python 3.11+
 - PySide6
 - openpyxl
+- Android Platform Tools（用于 adb 操作）
 
 安装命令：
 
@@ -32,9 +35,17 @@ python main.py
 pip install PySide6 openpyxl
 ```
 
+ADB 检查：
+
+```bash
+adb devices
+```
+
+如果命令不可用，请安装 Android Platform Tools，并将其目录加入 PATH。
+
 ## 当前版本说明
 
-当前版本为 Phase 3，在原有 UI 原型和 FakeCMW500 测试闭环基础上增加了结果汇总和 Excel 导出：
+当前版本为 Phase 5，在原有 UI 原型、FakeCMW500 测试闭环、信道配置和结果导出基础上增加了基础手机控制能力：
 
 - `MainWindow(QMainWindow)` 作为主窗口。
 - `LeftPanel`、`CenterPanel`、`RightPanel` 通过 `QSplitter(Qt.Horizontal)` 组成三栏布局。
@@ -45,6 +56,8 @@ pip install PySide6 openpyxl
 - `core/result_summary.py` 按制式、Band、信道、频点类型、测试模式分组计算灵敏度点。
 - `reports/excel_exporter.py` 使用 openpyxl 导出 RawResults 和 Summary 两个 Sheet。
 - `core/channel_config.py` 解析信道配置 Excel，`scripts/create_sample_channel_config.py` 可生成示例配置文件。
+- `devices/adb_client.py` 封装 adb 命令调用，所有操作带超时和异常处理。
+- `core/serial_config.py` 解析 YAML/JSON 串口配置文件。
 
 生成示例信道配置：
 
@@ -52,10 +65,39 @@ pip install PySide6 openpyxl
 python scripts/create_sample_channel_config.py
 ```
 
+串口配置 YAML 示例：
+
+```yaml
+serial_ports:
+  - name: phone_debug
+    port: COM5
+    baudrate: 115200
+    role: phone
+  - name: relay_board
+    port: COM8
+    baudrate: 9600
+    role: relay
+```
+
+串口配置 JSON 示例：
+
+```json
+{
+  "serial_ports": [
+    {
+      "name": "phone_debug",
+      "port": "COM5",
+      "baudrate": 115200,
+      "role": "phone"
+    }
+  ]
+}
+```
+
 ## 后续计划
 
 - 接入真实 CMW500 通信流程。
-- 增加 pyvisa、串口、adb 等实际控制模块。
+- 增加 pyvisa、串口通信等实际控制模块。
 - 实现配置文件解析与参数校验。
 - 增加真实测试流程、异常恢复、结果导出与报告生成。
 - 引入数据持久化和更完整的测试记录管理。
@@ -64,9 +106,6 @@ python scripts/create_sample_channel_config.py
 
 - 真实 CMW500 通信
 - 真实 pyvisa
-- 真实 adb 命令
-- 真实 Excel 解析
 - 真实串口通信
 - 真实测试流程和真实仪表测量
 - 数据库存储
-- Excel 导出

@@ -5,3 +5,4 @@ __pycache__/
 *.pyo
 *.log
 cmw500_test_results_*.xlsx
+data/screenshots/
