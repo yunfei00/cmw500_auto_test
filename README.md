@@ -11,6 +11,7 @@ CMW500 手机灵敏度自动化测试工具 UI 原型。
 - 支持 LTE 假仪表自动测试流程：生成测试计划、后台线程执行、实时写入表格/摘要/日志。
 - 支持测试暂停、继续、停止，测试结束后自动恢复按钮状态。
 - 支持 LTE 测试结果汇总、灵敏度点计算，以及 RawResults/Summary 双 Sheet Excel 导出。
+- 支持加载 LTE 信道配置 Excel，并优先使用 Excel 中的 Band/频点/信道映射生成测试计划。
 
 ## 运行方式
 
@@ -43,6 +44,13 @@ pip install PySide6 openpyxl
 - `core/fake_cmw500.py` 根据接收电平模拟 BLER，`core/result_judge.py` 根据 BLER 门限判定 PASS/FAIL。
 - `core/result_summary.py` 按制式、Band、信道、频点类型、测试模式分组计算灵敏度点。
 - `reports/excel_exporter.py` 使用 openpyxl 导出 RawResults 和 Summary 两个 Sheet。
+- `core/channel_config.py` 解析信道配置 Excel，`scripts/create_sample_channel_config.py` 可生成示例配置文件。
+
+生成示例信道配置：
+
+```bash
+python scripts/create_sample_channel_config.py
+```
 
 ## 后续计划
 

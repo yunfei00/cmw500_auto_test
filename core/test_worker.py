@@ -4,6 +4,7 @@ import time
 
 from PySide6.QtCore import QObject, QMutex, QMutexLocker, QTime, Signal
 
+from core.channel_config import ChannelConfigManager
 from core.fake_cmw500 import FakeCMW500
 from core.models import LteTestConfig, TestResult
 from core.result_judge import judge_bler
@@ -17,9 +18,14 @@ class TestWorker(QObject):
     finished_signal = Signal()
     state_signal = Signal(str)
 
-    def __init__(self, config: LteTestConfig) -> None:
+    def __init__(
+        self,
+        config: LteTestConfig,
+        channel_manager: ChannelConfigManager | None = None,
+    ) -> None:
         super().__init__()
         self.config = config
+        self.channel_manager = channel_manager
         self.test_plan = []
         self.cmw500 = FakeCMW500()
         self._paused = False
@@ -29,7 +35,7 @@ class TestWorker(QObject):
     def run(self) -> None:
         self.state_signal.emit("running")
         self.log_signal.emit("INFO", "开始生成 LTE 测试计划")
-        self.test_plan = generate_lte_test_plan(self.config)
+        self.test_plan = generate_lte_test_plan(self.config, self.channel_manager)
         total = len(self.test_plan)
         self.log_signal.emit("INFO", f"共生成 {total} 条测试项")
 

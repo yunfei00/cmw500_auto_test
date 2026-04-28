@@ -4,3 +4,4 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.log
+cmw500_test_results_*.xlsx

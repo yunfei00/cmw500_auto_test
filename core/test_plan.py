@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.channel_config import ChannelConfigManager
 from core.models import LteTestConfig, TestItem
 
 
@@ -20,7 +21,10 @@ FALLBACK_LTE_CHANNELS = {"低频点": 100, "中频点": 200, "高频点": 300, "
 CUSTOM_CHANNEL_TYPE = "自定义频点"
 
 
-def generate_lte_test_plan(config: LteTestConfig) -> list[TestItem]:
+def generate_lte_test_plan(
+    config: LteTestConfig,
+    channel_manager: ChannelConfigManager | None = None,
+) -> list[TestItem]:
     bands = config.selected_bands or ["B3"]
     channel_types = config.selected_channel_types or ["中频点"]
     normal_channel_types = [channel_type for channel_type in channel_types if channel_type != CUSTOM_CHANNEL_TYPE]
@@ -32,9 +36,13 @@ def generate_lte_test_plan(config: LteTestConfig) -> list[TestItem]:
     index = 1
 
     for band in bands:
-        channel_map = DEFAULT_LTE_CHANNELS.get(band, FALLBACK_LTE_CHANNELS)
+        channel_map, uses_loaded_config = _resolve_channel_map(band, channel_manager)
         for channel_type in normal_channel_types:
-            channel = channel_map.get(channel_type, FALLBACK_LTE_CHANNELS.get(channel_type, 200))
+            channel = channel_map.get(channel_type)
+            if channel is None:
+                if uses_loaded_config:
+                    continue
+                channel = FALLBACK_LTE_CHANNELS.get(channel_type, 200)
             for level in levels:
                 items.append(
                     TestItem(
@@ -66,6 +74,17 @@ def generate_lte_test_plan(config: LteTestConfig) -> list[TestItem]:
                     index += 1
 
     return items
+
+
+def _resolve_channel_map(
+    band: str,
+    channel_manager: ChannelConfigManager | None,
+) -> tuple[dict[str, int], bool]:
+    if channel_manager and channel_manager.has_config():
+        configured_channels = channel_manager.get_channels("LTE", band)
+        if configured_channels:
+            return configured_channels, True
+    return DEFAULT_LTE_CHANNELS.get(band, FALLBACK_LTE_CHANNELS), False
 
 
 def _generate_levels(start_level: float, stop_level: float, min_step: float) -> list[float]:

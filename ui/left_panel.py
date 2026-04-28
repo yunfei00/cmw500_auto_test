@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.channel_config import ChannelConfigManager
 from core.models import LteTestConfig
 from core.test_worker import TestWorker
 
@@ -45,6 +46,7 @@ class LeftPanel(QScrollArea):
 
         self.worker_thread: QThread | None = None
         self.worker: TestWorker | None = None
+        self.channel_manager = ChannelConfigManager()
         self._test_running = False
         self.band_checkboxes: dict[int, QCheckBox] = {}
         self.channel_type_checkboxes: dict[str, QCheckBox] = {}
@@ -241,7 +243,7 @@ class LeftPanel(QScrollArea):
     ) -> None:
         browse_button = QPushButton("浏览")
         load_button = QPushButton("加载")
-        browse_button.clicked.connect(lambda: self._browse_file(line_edit))
+        browse_button.clicked.connect(lambda: self._browse_config_file(label_text, line_edit))
         load_button.clicked.connect(lambda: self._load_config_file(label_text, line_edit.text()))
 
         layout.addWidget(QLabel(f"{label_text}："), row, 0)
@@ -414,14 +416,49 @@ class LeftPanel(QScrollArea):
             checkbox.setChecked(band in common_bands)
         self._log("INFO", "已选择常用 LTE Band")
 
-    def _browse_file(self, line_edit: QLineEdit) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "选择配置文件", "", "配置文件 (*.json *.ini *.txt *.csv);;所有文件 (*.*)")
+    def _browse_config_file(self, label_text: str, line_edit: QLineEdit) -> None:
+        if label_text == "信道配置文件":
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择信道配置文件",
+                "",
+                "Excel 工作簿 (*.xlsx);;所有文件 (*.*)",
+            )
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择配置文件",
+                "",
+                "配置文件 (*.json *.ini *.txt *.csv);;所有文件 (*.*)",
+            )
         if path:
             line_edit.setText(path)
 
     def _load_config_file(self, label_text: str, path: str) -> None:
+        if label_text == "信道配置文件":
+            self._load_channel_config_file(path)
+            return
         display_path = path.strip() or "未选择文件"
         self._log("INFO", f"已加载 {label_text} 配置文件：{display_path}")
+
+    def _load_channel_config_file(self, path: str) -> None:
+        config_path = path.strip()
+        if not config_path:
+            self._log("ERROR", "请选择信道配置文件")
+            return
+
+        try:
+            self.channel_manager.load_excel(config_path)
+        except Exception as exc:
+            self._log("ERROR", f"信道配置文件加载失败：{exc}")
+            return
+
+        supported_bands = self.channel_manager.get_supported_bands("LTE")
+        self._log("INFO", f"已加载信道配置文件：{config_path}")
+        self._log("INFO", f"LTE支持Band数量：{len(supported_bands)}")
+        checked_bands = self._check_loaded_lte_bands(supported_bands)
+        if checked_bands:
+            self._log("INFO", f"已自动勾选 LTE Band：{', '.join(checked_bands)}")
 
     def _refresh_devices(self) -> None:
         self.device_combo.clear()
@@ -483,7 +520,7 @@ class LeftPanel(QScrollArea):
 
         config = self.collect_lte_config()
         self.worker_thread = QThread(self)
-        self.worker = TestWorker(config)
+        self.worker = TestWorker(config, self.channel_manager)
         self.worker.moveToThread(self.worker_thread)
 
         self.worker_thread.started.connect(self.worker.run)
@@ -561,3 +598,16 @@ class LeftPanel(QScrollArea):
             self.pause_button.setText("暂停测试")
         if self.stop_button:
             self.stop_button.setEnabled(False)
+
+    def _check_loaded_lte_bands(self, supported_bands: list[str]) -> list[str]:
+        checked_bands: list[str] = []
+        for band in supported_bands:
+            try:
+                band_number = int(band.replace("B", ""))
+            except ValueError:
+                continue
+            checkbox = self.band_checkboxes.get(band_number)
+            if checkbox:
+                checkbox.setChecked(True)
+                checked_bands.append(band)
+        return checked_bands
