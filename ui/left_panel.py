@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from core.channel_config import ChannelConfigManager
 from core.fake_cmw500 import FakeCMW500
 from core.models import LteTestConfig
+from core.scpi_template import ScpiTemplateManager
 from core.serial_config import SerialConfigManager
 from core.test_worker import TestWorker
 from devices.adb_client import AdbClient
@@ -70,6 +71,7 @@ class LeftPanel(QScrollArea):
         self.worker: TestWorker | None = None
         self.channel_manager = ChannelConfigManager()
         self.serial_config_manager = SerialConfigManager()
+        self.scpi_template_manager: ScpiTemplateManager | None = None
         self.adb_client = AdbClient()
         self.instrument: InstrumentBase | None = None
         self.instrument_mode = "Fake"
@@ -306,9 +308,11 @@ class LeftPanel(QScrollArea):
 
         self.channel_file_edit = QLineEdit()
         self.serial_file_edit = QLineEdit()
+        self.scpi_template_file_edit = QLineEdit()
 
         self._add_file_row(layout, 0, "信道配置文件", self.channel_file_edit)
         self._add_file_row(layout, 1, "串口配置文件", self.serial_file_edit)
+        self._add_file_row(layout, 2, "CMW500命令配置文件", self.scpi_template_file_edit)
         return group
 
     def _add_file_row(
@@ -508,6 +512,13 @@ class LeftPanel(QScrollArea):
                 "",
                 "串口配置文件 (*.yaml *.yml *.json);;所有文件 (*.*)",
             )
+        elif label_text == "CMW500命令配置文件":
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择 CMW500 命令配置文件",
+                "",
+                "SCPI 模板文件 (*.yaml *.yml *.json);;所有文件 (*.*)",
+            )
         else:
             path, _ = QFileDialog.getOpenFileName(
                 self,
@@ -524,6 +535,9 @@ class LeftPanel(QScrollArea):
             return
         if label_text == "串口配置文件":
             self._load_serial_config_file(path)
+            return
+        if label_text == "CMW500命令配置文件":
+            self._load_scpi_template_file(path)
             return
         display_path = path.strip() or "未选择文件"
         self._log("INFO", f"已加载 {label_text} 配置文件：{display_path}")
@@ -563,6 +577,34 @@ class LeftPanel(QScrollArea):
         self._log("INFO", f"已加载串口配置文件：{config_path}")
         self._log("INFO", f"共加载 {port_count} 个串口配置")
 
+    def _load_scpi_template_file(self, path: str) -> None:
+        config_path = path.strip()
+        if not config_path:
+            self._log("ERROR", "请选择 CMW500 命令配置文件")
+            return
+
+        manager = ScpiTemplateManager()
+        try:
+            manager.load_file(config_path)
+        except Exception as exc:
+            self._log("ERROR", f"CMW500 命令配置文件加载失败：{exc}")
+            return
+
+        template = manager.get_lte_template()
+        if not template:
+            self._log("ERROR", "CMW500 命令配置文件未包含 LTE 模板")
+            return
+
+        self.scpi_template_manager = manager
+        if isinstance(self.instrument, RealCMW500):
+            self.instrument.set_scpi_template_manager(manager)
+            self._log("INFO", "已将 SCPI 模板绑定到 RealCMW500")
+
+        self._log("INFO", f"已加载 CMW500 命令配置文件：{config_path}")
+        self._log("INFO", f"LTE setup 命令数：{len(template.setup)}")
+        self._log("INFO", f"LTE set_rx_level 命令数：{len(template.set_rx_level)}")
+        self._log("INFO", f"LTE measure_bler parser：{template.measure_bler.parser}")
+
     def _on_instrument_mode_changed(self, mode: str) -> None:
         self.instrument_mode = mode
         if self.instrument:
@@ -593,6 +635,8 @@ class LeftPanel(QScrollArea):
             return
 
         instrument = RealCMW500(host, port, timeout)
+        if self.scpi_template_manager:
+            instrument.set_scpi_template_manager(self.scpi_template_manager)
         self.instrument_status_label.setText("连接中...")
 
         def action() -> tuple[bool, str, object | None]:
@@ -604,6 +648,8 @@ class LeftPanel(QScrollArea):
                 self.instrument = payload
                 self.instrument_status_label.setText("Real CMW500 已连接")
                 self._log("INFO", message)
+                if self.scpi_template_manager:
+                    self._log("INFO", "已将 SCPI 模板绑定到 RealCMW500")
             else:
                 self.instrument = None
                 self.instrument_status_label.setText("连接失败")
@@ -765,6 +811,11 @@ class LeftPanel(QScrollArea):
 
         self._set_test_buttons_running()
         self._log("INFO", f"测试开始时使用的仪表模式：{self.instrument_mode}")
+        if isinstance(instrument, RealCMW500):
+            if self.scpi_template_manager and self.scpi_template_manager.has_template():
+                self._log("INFO", "使用 CMW500 SCPI 模板执行 LTE 测试")
+            else:
+                self._log("WARNING", "未加载 CMW500 命令配置文件，RealCMW500 将仅连接仪表但 BLER 使用模拟值")
         self._log("INFO", "开始测试")
         self.worker_thread.start()
 

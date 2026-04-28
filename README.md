@@ -15,11 +15,12 @@ CMW500 手机灵敏度自动化测试工具 UI 原型。
 - 支持基础 ADB 手机控制：刷新设备、安装 App、重启、停止/启动 App、清除数据、截图。
 - 支持加载串口配置文件，格式为 YAML 或 JSON。
 - 支持仪表模式切换：Fake CMW500 与 Real CMW500 TCP Socket/SCPI 连接。
+- 支持 CMW500 LTE SCPI 命令模板配置，让 RealCMW500 从 YAML/JSON 模板执行 LTE setup、RX Level 设置和 BLER 查询。
 
 ## 运行方式
 
 ```bash
-pip install PySide6 openpyxl
+pip install PySide6 openpyxl PyYAML
 python main.py
 ```
 
@@ -28,12 +29,13 @@ python main.py
 - Python 3.11+
 - PySide6
 - openpyxl
+- PyYAML
 - Android Platform Tools（用于 adb 操作）
 
 安装命令：
 
 ```bash
-pip install PySide6 openpyxl
+pip install PySide6 openpyxl PyYAML
 ```
 
 ADB 检查：
@@ -46,7 +48,7 @@ adb devices
 
 ## 当前版本说明
 
-当前版本为 Phase 6，在原有 UI 原型、FakeCMW500 测试闭环、信道配置、结果导出和手机控制基础上增加了 CMW500 Socket/SCPI 通信层：
+当前版本为 Phase 7，在原有 UI 原型、FakeCMW500 测试闭环、信道配置、结果导出、手机控制和 CMW500 Socket/SCPI 通信层基础上增加了可配置 SCPI 命令模板执行框架：
 
 - `MainWindow(QMainWindow)` 作为主窗口。
 - `LeftPanel`、`CenterPanel`、`RightPanel` 通过 `QSplitter(Qt.Horizontal)` 组成三栏布局。
@@ -62,6 +64,7 @@ adb devices
 - `devices/scpi_socket_client.py` 使用 Python 标准库 socket 实现 SCPI TCP 客户端，默认端口 `5025`。
 - `devices/cmw500_controller.py` 提供 `RealCMW500` 控制器，支持 TCP 连接、断开、`*IDN?` 查询、`*RST` 和 `SYST:PRES` 基础命令。
 - `core/fake_cmw500.py` 保持默认可用回退模式，并兼容统一仪表接口。
+- `core/scpi_template.py` 解析 CMW500 LTE SCPI 命令模板，并支持模板变量渲染和测量返回值解析。
 
 ## 仪表连接说明
 
@@ -90,7 +93,57 @@ Fake CMW500 Simulator
 - RX Level 真实设置 SCPI
 - BLER 真实读取 SCPI
 
-因此 Real 模式下测试流程暂时仍使用模拟 BLER，并会在日志中明确提示“当前 RealCMW500 BLER 为模拟值，真实测量命令尚未配置”。后续需要根据实际 CMW500 选件和测试应用补充 LTE/BLER 相关 SCPI 命令。
+加载 CMW500 命令模板后，Real 模式会按模板执行 LTE setup、RX Level 设置和 BLER 查询；未加载模板或模板执行失败且允许回退时，会使用模拟 BLER，并在日志中输出 WARNING。后续需要根据实际 CMW500 选件和测试应用补充并校准 LTE/BLER 相关 SCPI 命令。
+
+## SCPI 命令模板
+
+Phase 7 实现的是 CMW500 LTE SCPI 命令模板执行框架。示例模板位于：
+
+```text
+config/cmw500_lte_scpi_template.example.yaml
+```
+
+示例内容：
+
+```yaml
+instrument:
+  name: CMW500
+  transport: socket
+  default_port: 5025
+
+lte:
+  setup:
+    - "INST LTE"
+    - "CONFigure:LTE:SIGN:BAND {band_number}"
+    - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
+  set_rx_level:
+    - "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
+  measure_bler:
+    query: "FETCh:LTE:SIGN:BLER?"
+    parser: "first_float"
+    fallback_simulation: true
+  cleanup:
+    - "SYST:ERR?"
+```
+
+支持变量：
+
+- `{mode}`
+- `{band}`
+- `{band_number}`
+- `{channel}`
+- `{channel_type}`
+- `{rx_level}`
+- `{packet_count}`
+- `{test_mode}`
+
+测量结果 parser：
+
+- `first_float`：提取返回字符串中的第一个浮点数
+- `second_float`：提取返回字符串中的第二个浮点数
+- `csv_index:N`：按逗号分隔后取第 N 个字段，N 从 0 开始
+
+`fallback_simulation` 为 `true` 时，如果真实 BLER 查询或解析失败，RealCMW500 会回退模拟 BLER，并在日志中输出 WARNING。示例命令只用于说明模板格式，不保证适配所有 CMW500；真实 LTE attach、信令建立、RX Level 设置和 BLER 读取流程需要根据仪表选件、应用模式和官方手册继续补充。
 
 生成示例信道配置：
 

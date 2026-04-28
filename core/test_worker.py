@@ -36,17 +36,14 @@ class TestWorker(QObject):
 
     def run(self) -> None:
         self.state_signal.emit("running")
-        self.log_signal.emit("INFO", f"测试执行仪表：{self.instrument.__class__.__name__}")
+        instrument_type = self.instrument.__class__.__name__
+        self.log_signal.emit("INFO", f"当前仪表类型：{instrument_type}")
         if not self._ensure_instrument_connected():
             self.state_signal.emit("finished")
             self.finished_signal.emit()
             return
 
-        if getattr(self.instrument, "fallback_simulation", False):
-            self.log_signal.emit(
-                "WARNING",
-                "当前 RealCMW500 BLER 为模拟值，真实测量命令尚未配置",
-            )
+        self._log_real_instrument_template_state()
 
         self.log_signal.emit("INFO", "开始生成 LTE 测试计划")
         self.test_plan = generate_lte_test_plan(self.config, self.channel_manager)
@@ -65,10 +62,11 @@ class TestWorker(QObject):
                     break
 
                 try:
-                    self.instrument.setup_lte(item.band, item.channel)
+                    self._setup_lte(item)
                     self.instrument.set_rx_level(item.rx_level)
                     time.sleep(min(max(self.config.settle_time, 0), 0.2))
                     bler = self.instrument.measure_bler(self.config.packet_count)
+                    self._emit_instrument_warning()
                     result = judge_bler(bler, self.config.bler_threshold)
                     status = "已完成"
                 except Exception as exc:
@@ -110,6 +108,37 @@ class TestWorker(QObject):
             self.log_signal.emit("ERROR", f"仪表连接失败，测试终止：{exc}")
             return False
         return True
+
+    def _log_real_instrument_template_state(self) -> None:
+        if self.instrument.__class__.__name__ != "RealCMW500":
+            return
+        manager = getattr(self.instrument, "scpi_template_manager", None)
+        has_template = bool(manager and manager.has_template())
+        self.log_signal.emit("INFO", f"RealCMW500 SCPI 模板已加载：{'是' if has_template else '否'}")
+        if has_template:
+            self.log_signal.emit("INFO", "使用 CMW500 SCPI 模板执行 LTE 测试")
+        else:
+            self.log_signal.emit("WARNING", "未加载 SCPI 模板，BLER 将使用模拟值")
+
+    def _setup_lte(self, item) -> None:
+        try:
+            self.instrument.setup_lte(
+                item.band,
+                item.channel,
+                channel_type=item.channel_type,
+                test_mode=item.test_mode,
+            )
+        except TypeError:
+            self.instrument.setup_lte(item.band, item.channel)
+
+    def _emit_instrument_warning(self) -> None:
+        warning = getattr(self.instrument, "last_warning", "")
+        if warning:
+            self.log_signal.emit("WARNING", warning)
+            try:
+                self.instrument.last_warning = ""
+            except Exception:
+                pass
 
     def _build_result(self, item, bler: float, result: str, status: str) -> TestResult:
         return TestResult(

@@ -1,0 +1,18 @@
+instrument:
+  name: CMW500
+  transport: socket
+  default_port: 5025
+
+lte:
+  setup:
+    - "INST LTE"
+    - "CONFigure:LTE:SIGN:BAND {band_number}"
+    - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
+  set_rx_level:
+    - "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
+  measure_bler:
+    query: "FETCh:LTE:SIGN:BLER?"
+    parser: "first_float"
+    fallback_simulation: true
+  cleanup:
+    - "SYST:ERR?"
