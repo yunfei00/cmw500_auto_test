@@ -9,6 +9,7 @@ from core.fake_cmw500 import FakeCMW500
 from core.models import LteTestConfig, TestResult
 from core.result_judge import judge_bler
 from core.test_plan import generate_lte_test_plan
+from devices.instrument_base import InstrumentBase
 
 
 class TestWorker(QObject):
@@ -22,18 +23,31 @@ class TestWorker(QObject):
         self,
         config: LteTestConfig,
         channel_manager: ChannelConfigManager | None = None,
+        instrument: InstrumentBase | None = None,
     ) -> None:
         super().__init__()
         self.config = config
         self.channel_manager = channel_manager
         self.test_plan = []
-        self.cmw500 = FakeCMW500()
+        self.instrument = instrument or FakeCMW500()
         self._paused = False
         self._stopped = False
         self._mutex = QMutex()
 
     def run(self) -> None:
         self.state_signal.emit("running")
+        self.log_signal.emit("INFO", f"测试执行仪表：{self.instrument.__class__.__name__}")
+        if not self._ensure_instrument_connected():
+            self.state_signal.emit("finished")
+            self.finished_signal.emit()
+            return
+
+        if getattr(self.instrument, "fallback_simulation", False):
+            self.log_signal.emit(
+                "WARNING",
+                "当前 RealCMW500 BLER 为模拟值，真实测量命令尚未配置",
+            )
+
         self.log_signal.emit("INFO", "开始生成 LTE 测试计划")
         self.test_plan = generate_lte_test_plan(self.config, self.channel_manager)
         total = len(self.test_plan)
@@ -50,25 +64,24 @@ class TestWorker(QObject):
                     self.log_signal.emit("INFO", "测试已收到停止请求，准备结束")
                     break
 
-                self.cmw500.setup_lte(item.band, item.channel)
-                self.cmw500.set_rx_level(item.rx_level)
-                time.sleep(min(max(self.config.settle_time, 0), 0.2))
-                bler = self.cmw500.measure_bler(self.config.packet_count)
-                result = judge_bler(bler, self.config.bler_threshold)
+                try:
+                    self.instrument.setup_lte(item.band, item.channel)
+                    self.instrument.set_rx_level(item.rx_level)
+                    time.sleep(min(max(self.config.settle_time, 0), 0.2))
+                    bler = self.instrument.measure_bler(self.config.packet_count)
+                    result = judge_bler(bler, self.config.bler_threshold)
+                    status = "已完成"
+                except Exception as exc:
+                    bler = 0.0
+                    result = "FAIL"
+                    status = "异常"
+                    self.log_signal.emit("ERROR", f"测试项 {item.index} 执行异常：{exc}")
 
-                test_result = TestResult(
-                    index=item.index,
-                    mode=item.mode,
-                    band=item.band,
-                    channel=item.channel,
-                    channel_type=item.channel_type,
-                    test_mode=item.test_mode,
-                    rx_level=item.rx_level,
-                    metric_type="BLER",
-                    metric_value=bler,
+                test_result = self._build_result(
+                    item=item,
+                    bler=bler,
                     result=result,
-                    status="已完成",
-                    timestamp=QTime.currentTime().toString("HH:mm:ss"),
+                    status=status,
                 )
 
                 self.row_signal.emit(test_result)
@@ -88,6 +101,31 @@ class TestWorker(QObject):
         finally:
             self.state_signal.emit("finished")
             self.finished_signal.emit()
+
+    def _ensure_instrument_connected(self) -> bool:
+        try:
+            if not self.instrument.is_connected():
+                self.instrument.connect()
+        except Exception as exc:
+            self.log_signal.emit("ERROR", f"仪表连接失败，测试终止：{exc}")
+            return False
+        return True
+
+    def _build_result(self, item, bler: float, result: str, status: str) -> TestResult:
+        return TestResult(
+            index=item.index,
+            mode=item.mode,
+            band=item.band,
+            channel=item.channel,
+            channel_type=item.channel_type,
+            test_mode=item.test_mode,
+            rx_level=item.rx_level,
+            metric_type="BLER",
+            metric_value=bler,
+            result=result,
+            status=status,
+            timestamp=QTime.currentTime().toString("HH:mm:ss"),
+        )
 
     def pause(self) -> None:
         with QMutexLocker(self._mutex):

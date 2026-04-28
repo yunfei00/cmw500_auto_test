@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -25,16 +25,36 @@ from PySide6.QtWidgets import (
 )
 
 from core.channel_config import ChannelConfigManager
+from core.fake_cmw500 import FakeCMW500
 from core.models import LteTestConfig
 from core.serial_config import SerialConfigManager
 from core.test_worker import TestWorker
 from devices.adb_client import AdbClient
+from devices.cmw500_controller import RealCMW500
+from devices.instrument_base import InstrumentBase
 
 
 LogCallback = Callable[[str, str], None]
 AddRowCallback = Callable[[object], None]
 UpdateSummaryCallback = Callable[[dict], None]
 FinishedCallback = Callable[[], None]
+InstrumentAction = Callable[[], tuple[bool, str, object | None]]
+InstrumentActionCallback = Callable[[bool, str, object | None], None]
+
+
+class InstrumentActionWorker(QObject):
+    finished_signal = Signal(bool, str, object)
+
+    def __init__(self, action: InstrumentAction) -> None:
+        super().__init__()
+        self.action = action
+
+    def run(self) -> None:
+        try:
+            success, message, payload = self.action()
+        except Exception as exc:
+            success, message, payload = False, str(exc), None
+        self.finished_signal.emit(success, message, payload)
 
 
 class LeftPanel(QScrollArea):
@@ -51,6 +71,9 @@ class LeftPanel(QScrollArea):
         self.channel_manager = ChannelConfigManager()
         self.serial_config_manager = SerialConfigManager()
         self.adb_client = AdbClient()
+        self.instrument: InstrumentBase | None = None
+        self.instrument_mode = "Fake"
+        self.instrument_action_tasks: list[tuple[QThread, InstrumentActionWorker]] = []
         self._test_running = False
         self.band_checkboxes: dict[int, QCheckBox] = {}
         self.channel_type_checkboxes: dict[str, QCheckBox] = {}
@@ -72,6 +95,7 @@ class LeftPanel(QScrollArea):
         layout.setSpacing(8)
 
         layout.addWidget(self._create_standard_group())
+        layout.addWidget(self._create_instrument_connection_group())
         layout.addWidget(self._create_file_group())
         layout.addWidget(self._create_phone_group())
         layout.addWidget(self._create_scene_group())
@@ -208,6 +232,55 @@ class LeftPanel(QScrollArea):
         button_layout.addWidget(common_button)
 
         layout.addLayout(grid)
+        layout.addLayout(button_layout)
+        return group
+
+    def _create_instrument_connection_group(self) -> QGroupBox:
+        group = QGroupBox("仪表连接")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(8, 14, 8, 8)
+        layout.setSpacing(8)
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+
+        self.instrument_mode_combo = QComboBox()
+        self.instrument_mode_combo.addItems(["Fake", "Real CMW500"])
+        self.instrument_mode_combo.currentTextChanged.connect(self._on_instrument_mode_changed)
+
+        self.instrument_host_edit = QLineEdit("192.168.1.100")
+        self.instrument_port_spin = QSpinBox()
+        self.instrument_port_spin.setRange(1, 65535)
+        self.instrument_port_spin.setValue(5025)
+
+        self.instrument_timeout_spin = QDoubleSpinBox()
+        self.instrument_timeout_spin.setRange(0.1, 60.0)
+        self.instrument_timeout_spin.setDecimals(1)
+        self.instrument_timeout_spin.setSingleStep(0.5)
+        self.instrument_timeout_spin.setSuffix(" s")
+        self.instrument_timeout_spin.setValue(5.0)
+
+        self.instrument_status_label = QLabel("未连接")
+
+        form.addRow("仪表模式：", self.instrument_mode_combo)
+        form.addRow("CMW500 IP：", self.instrument_host_edit)
+        form.addRow("端口：", self.instrument_port_spin)
+        form.addRow("超时：", self.instrument_timeout_spin)
+        form.addRow("状态：", self.instrument_status_label)
+
+        button_layout = QHBoxLayout()
+        connect_button = QPushButton("连接仪表")
+        disconnect_button = QPushButton("断开仪表")
+        idn_button = QPushButton("查询IDN")
+        connect_button.clicked.connect(lambda: self._connect_instrument())
+        disconnect_button.clicked.connect(lambda: self._disconnect_instrument())
+        idn_button.clicked.connect(lambda: self._query_instrument_idn())
+        button_layout.addWidget(connect_button)
+        button_layout.addWidget(disconnect_button)
+        button_layout.addWidget(idn_button)
+
+        layout.addLayout(form)
         layout.addLayout(button_layout)
         return group
 
@@ -490,6 +563,115 @@ class LeftPanel(QScrollArea):
         self._log("INFO", f"已加载串口配置文件：{config_path}")
         self._log("INFO", f"共加载 {port_count} 个串口配置")
 
+    def _on_instrument_mode_changed(self, mode: str) -> None:
+        self.instrument_mode = mode
+        if self.instrument:
+            try:
+                self.instrument.disconnect()
+            except Exception:
+                pass
+        self.instrument = None
+        self.instrument_status_label.setText("未连接")
+        self._log("INFO", f"仪表模式切换：{mode}")
+
+    def _connect_instrument(self) -> None:
+        mode = self.instrument_mode_combo.currentText()
+        self.instrument_mode = mode
+        if mode == "Fake":
+            instrument = FakeCMW500()
+            instrument.connect()
+            self.instrument = instrument
+            self.instrument_status_label.setText("Fake 已连接")
+            self._log("INFO", "Fake CMW500 已连接")
+            return
+
+        host = self.instrument_host_edit.text().strip()
+        port = self.instrument_port_spin.value()
+        timeout = self.instrument_timeout_spin.value()
+        if not host:
+            self._log("ERROR", "请填写 CMW500 IP")
+            return
+
+        instrument = RealCMW500(host, port, timeout)
+        self.instrument_status_label.setText("连接中...")
+
+        def action() -> tuple[bool, str, object | None]:
+            instrument.connect()
+            return True, f"Real CMW500 已连接：{host}:{port}", instrument
+
+        def on_finished(success: bool, message: str, payload: object | None) -> None:
+            if success and isinstance(payload, RealCMW500):
+                self.instrument = payload
+                self.instrument_status_label.setText("Real CMW500 已连接")
+                self._log("INFO", message)
+            else:
+                self.instrument = None
+                self.instrument_status_label.setText("连接失败")
+                self._log("ERROR", f"Real CMW500 连接失败：{message}")
+
+        self._run_instrument_action(action, on_finished)
+
+    def _disconnect_instrument(self) -> None:
+        if self.instrument:
+            try:
+                self.instrument.disconnect()
+            except Exception as exc:
+                self._log("ERROR", f"仪表断开异常：{exc}")
+        self.instrument = None
+        self.instrument_status_label.setText("未连接")
+        self._log("INFO", "仪表已断开")
+
+    def _query_instrument_idn(self) -> None:
+        if not self._instrument_connected():
+            self._log("ERROR", "请先连接仪表")
+            return
+
+        instrument = self.instrument
+
+        def action() -> tuple[bool, str, object | None]:
+            if not instrument:
+                return False, "请先连接仪表", None
+            return True, instrument.query_idn(), None
+
+        def on_finished(success: bool, message: str, payload: object | None) -> None:
+            if success:
+                self._log("INFO", f"IDN 返回：{message}")
+            else:
+                self._log("ERROR", f"查询 IDN 失败：{message}")
+
+        self._run_instrument_action(action, on_finished)
+
+    def _run_instrument_action(
+        self,
+        action: InstrumentAction,
+        on_finished: InstrumentActionCallback,
+    ) -> None:
+        thread = QThread(self)
+        worker = InstrumentActionWorker(action)
+        worker.moveToThread(thread)
+        entry = (thread, worker)
+
+        def cleanup() -> None:
+            if entry in self.instrument_action_tasks:
+                self.instrument_action_tasks.remove(entry)
+
+        thread.started.connect(worker.run)
+        worker.finished_signal.connect(on_finished)
+        worker.finished_signal.connect(thread.quit)
+        worker.finished_signal.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(cleanup)
+        self.instrument_action_tasks.append(entry)
+        thread.start()
+
+    def _instrument_connected(self) -> bool:
+        if not self.instrument:
+            return False
+        try:
+            return self.instrument.is_connected()
+        except Exception:
+            return False
+
     def _refresh_devices(self) -> None:
         devices = self.adb_client.list_devices()
         self.device_combo.clear()
@@ -565,8 +747,12 @@ class LeftPanel(QScrollArea):
             return
 
         config = self.collect_lte_config()
+        instrument = self._prepare_instrument_for_test()
+        if not instrument:
+            return
+
         self.worker_thread = QThread(self)
-        self.worker = TestWorker(config, self.channel_manager)
+        self.worker = TestWorker(config, self.channel_manager, instrument)
         self.worker.moveToThread(self.worker_thread)
 
         self.worker_thread.started.connect(self.worker.run)
@@ -578,6 +764,7 @@ class LeftPanel(QScrollArea):
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
 
         self._set_test_buttons_running()
+        self._log("INFO", f"测试开始时使用的仪表模式：{self.instrument_mode}")
         self._log("INFO", "开始测试")
         self.worker_thread.start()
 
@@ -679,6 +866,23 @@ class LeftPanel(QScrollArea):
             self.pause_button.setText("暂停测试")
         if self.stop_button:
             self.stop_button.setEnabled(False)
+
+    def _prepare_instrument_for_test(self) -> InstrumentBase | None:
+        mode = self.instrument_mode_combo.currentText()
+        self.instrument_mode = mode
+        if mode == "Fake":
+            if not isinstance(self.instrument, FakeCMW500):
+                self.instrument = FakeCMW500()
+            if not self.instrument.is_connected():
+                self.instrument.connect()
+                self.instrument_status_label.setText("Fake 已连接")
+                self._log("INFO", "Fake CMW500 已连接")
+            return self.instrument
+
+        if not self._instrument_connected():
+            self._log("ERROR", "请先连接 Real CMW500")
+            return None
+        return self.instrument
 
     def _check_loaded_lte_bands(self, supported_bands: list[str]) -> list[str]:
         checked_bands: list[str] = []

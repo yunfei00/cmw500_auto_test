@@ -6,9 +6,22 @@ import time
 
 class FakeCMW500:
     def __init__(self) -> None:
+        self.connected = False
         self.band = ""
         self.channel = 0
         self.rx_level = -70.0
+
+    def connect(self) -> None:
+        self.connected = True
+
+    def disconnect(self) -> None:
+        self.connected = False
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+    def query_idn(self) -> str:
+        return "Fake CMW500 Simulator"
 
     def setup_lte(self, band: str, channel: int) -> None:
         self.band = band
