@@ -20,6 +20,7 @@ class MainWindow(QMainWindow):
         self.center_panel.set_logger(self.right_panel.append_log)
         self.left_panel.set_add_row_callback(self.center_panel.add_test_row)
         self.left_panel.set_update_summary_callback(self.center_panel.update_summary)
+        self.left_panel.set_finished_callback(self.center_panel.generate_summary_from_current_results)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.left_panel)

@@ -31,6 +31,7 @@ from core.test_worker import TestWorker
 LogCallback = Callable[[str, str], None]
 AddRowCallback = Callable[[object], None]
 UpdateSummaryCallback = Callable[[dict], None]
+FinishedCallback = Callable[[], None]
 
 
 class LeftPanel(QScrollArea):
@@ -39,6 +40,7 @@ class LeftPanel(QScrollArea):
         self._logger: LogCallback | None = None
         self._add_row_callback: AddRowCallback | None = None
         self._update_summary_callback: UpdateSummaryCallback | None = None
+        self._finished_callback: FinishedCallback | None = None
         self._pause_state = False
 
         self.worker_thread: QThread | None = None
@@ -81,6 +83,9 @@ class LeftPanel(QScrollArea):
 
     def set_update_summary_callback(self, callback: UpdateSummaryCallback) -> None:
         self._update_summary_callback = callback
+
+    def set_finished_callback(self, callback: FinishedCallback) -> None:
+        self._finished_callback = callback
 
     def _log(self, level: str, message: str) -> None:
         if self._logger:
@@ -518,6 +523,8 @@ class LeftPanel(QScrollArea):
 
     def on_test_finished(self) -> None:
         self._restore_test_buttons()
+        if self._finished_callback:
+            self._finished_callback()
         if self.worker_thread:
             self.worker_thread.quit()
             self.worker_thread.wait()
