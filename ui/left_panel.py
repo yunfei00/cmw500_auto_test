@@ -777,23 +777,16 @@ class LeftPanel(QScrollArea):
         action: InstrumentAction,
         on_finished: InstrumentActionCallback,
     ) -> None:
-        thread = QThread(self)
-        worker = InstrumentActionWorker(action)
-        worker.moveToThread(thread)
-        entry = (thread, worker)
+        """执行仪表动作。
 
-        def cleanup() -> None:
-            if entry in self.instrument_action_tasks:
-                self.instrument_action_tasks.remove(entry)
-
-        thread.started.connect(worker.run)
-        worker.finished_signal.connect(on_finished)
-        worker.finished_signal.connect(thread.quit)
-        worker.finished_signal.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(cleanup)
-        self.instrument_action_tasks.append(entry)
-        thread.start()
+        这里使用同步执行，避免将 VISA/Socket 连接对象在 Qt 线程间传递，
+        导致底层驱动对象线程归属异常并触发闪退。
+        """
+        try:
+            success, message, payload = action()
+        except Exception as exc:
+            success, message, payload = False, str(exc), None
+        on_finished(success, message, payload)
 
     def _instrument_connected(self) -> bool:
         if not self.instrument:
