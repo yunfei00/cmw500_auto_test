@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QSettings, QThread, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -61,6 +61,10 @@ class InstrumentActionWorker(QObject):
 
 
 class LeftPanel(QScrollArea):
+    SETTINGS_ORG = "cmw500_tool"
+    SETTINGS_APP = "cmw500_auto_test"
+    LAST_VISA_RESOURCE_KEY = "instrument/last_visa_resource"
+
     def __init__(self) -> None:
         super().__init__()
         self._logger: LogCallback | None = None
@@ -88,6 +92,7 @@ class LeftPanel(QScrollArea):
         self.start_button: QPushButton | None = None
         self.pause_button: QPushButton | None = None
         self.stop_button: QPushButton | None = None
+        self.settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
 
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -108,6 +113,7 @@ class LeftPanel(QScrollArea):
         layout.addStretch(1)
 
         self.setWidget(container)
+        self._restore_last_instrument_resource()
 
     def set_logger(self, logger: LogCallback) -> None:
         self._logger = logger
@@ -710,6 +716,7 @@ class LeftPanel(QScrollArea):
                 self.instrument = payload
                 self.instrument_status_label.setText("已连接")
                 self._log("INFO", message)
+                self._save_last_instrument_resource()
                 if self.scpi_template_manager:
                     self._log("INFO", "已将 SCPI 模板绑定到 RealCMW500")
             else:
@@ -718,6 +725,41 @@ class LeftPanel(QScrollArea):
                 self._log("ERROR", f"Real CMW500 连接失败：{message}")
 
         self._run_instrument_action(action, on_finished)
+
+    def _handle_scanned_cmw_candidates(self, cmw_candidates: list[tuple[str, str]]) -> None:
+        if not cmw_candidates:
+            self._log("WARNING", "扫描到的 VISA 设备中未识别到 CMW（*IDN? 不包含 CMW）")
+            return
+        preferred_resource = self._pick_preferred_cmw_resource(cmw_candidates)
+        self.visa_resource_edit.setText(preferred_resource)
+        self._save_last_instrument_resource(preferred_resource)
+        self._log("INFO", f"已自动刷新仪表资源描述符：{preferred_resource}")
+        for resource, idn in cmw_candidates:
+            self._log("INFO", f"CMW候选：{resource} -> {idn}")
+
+    def _pick_preferred_cmw_resource(self, cmw_candidates: list[tuple[str, str]]) -> str:
+        last_resource = self._last_saved_instrument_resource()
+        for resource, _idn in cmw_candidates:
+            if resource == last_resource:
+                return resource
+        return cmw_candidates[0][0]
+
+    def _restore_last_instrument_resource(self) -> None:
+        last_resource = self._last_saved_instrument_resource()
+        if not last_resource:
+            return
+        self.visa_resource_edit.setText(last_resource)
+        self._log("INFO", f"默认加载上次连接仪表资源：{last_resource}")
+
+    def _last_saved_instrument_resource(self) -> str:
+        value = self.settings.value(self.LAST_VISA_RESOURCE_KEY, "", str)
+        return value.strip() if isinstance(value, str) else ""
+
+    def _save_last_instrument_resource(self, resource: str | None = None) -> None:
+        target = resource.strip() if isinstance(resource, str) else self.visa_resource_edit.text().strip()
+        if not target:
+            return
+        self.settings.setValue(self.LAST_VISA_RESOURCE_KEY, target)
 
     def _scan_visa_resources(self) -> None:
         def action() -> tuple[bool, str, object | None]:
@@ -728,15 +770,30 @@ class LeftPanel(QScrollArea):
             rm = pyvisa.ResourceManager()
             try:
                 resources = rm.list_resources()
+                cmw_candidates: list[tuple[str, str]] = []
+                for resource in resources:
+                    try:
+                        inst = rm.open_resource(resource)
+                        try:
+                            inst.timeout = min(self.visa_timeout_spin.value(), 2000)
+                            idn = str(inst.query("*IDN?")).strip()
+                        finally:
+                            inst.close()
+                    except Exception:
+                        continue
+                    if "CMW" in idn.upper():
+                        cmw_candidates.append((resource, idn))
             finally:
                 rm.close()
             if not resources:
                 return True, "未扫描到 VISA 设备", None
-            return True, "扫描结果：" + "，".join(resources), None
+            return True, "扫描结果：" + "，".join(resources), cmw_candidates
 
         def on_finished(success: bool, message: str, payload: object | None) -> None:
             if success:
                 self._log("INFO", message)
+                if isinstance(payload, list):
+                    self._handle_scanned_cmw_candidates(payload)
             else:
                 self._log("ERROR", message)
 
