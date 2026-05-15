@@ -5,22 +5,17 @@ import time
 
 from core.scpi_template import ScpiTemplateManager
 from devices.instrument_base import InstrumentBase
-from devices.scpi_socket_client import ScpiSocketClient
+from devices.instrument_transport import InstrumentTransport, SocketTransport
 
 
 class RealCMW500(InstrumentBase):
     def __init__(
         self,
-        host: str,
-        port: int = 5025,
-        timeout: float = 5.0,
+        transport: InstrumentTransport,
         fallback_simulation: bool = True,
     ) -> None:
-        self.host = host
-        self.port = port
-        self.timeout = timeout
+        self.transport = transport
         self.fallback_simulation = fallback_simulation
-        self.client = ScpiSocketClient(host, port, timeout)
         self.scpi_template_manager: ScpiTemplateManager | None = None
         self.current_band = ""
         self.current_channel = 0
@@ -32,23 +27,33 @@ class RealCMW500(InstrumentBase):
         self.last_commands: list[str] = []
 
     def connect(self) -> None:
-        self.client.connect()
+        self.transport.connect()
 
     def disconnect(self) -> None:
-        self.client.disconnect()
+        self.transport.close()
 
     def is_connected(self) -> bool:
-        return self.client.is_connected()
+        return self.transport.is_connected()
 
     def query_idn(self) -> str:
         return self.query("*IDN?")
 
     def write(self, command: str) -> None:
-        self.client.write(command)
+        self.transport.write(command)
 
     def query(self, command: str) -> str:
-        return self.client.query(command)
+        return self.transport.query(command)
 
+
+    @classmethod
+    def from_socket(
+        cls,
+        host: str,
+        port: int = 5025,
+        timeout_ms: int = 10000,
+        fallback_simulation: bool = True,
+    ) -> "RealCMW500":
+        return cls(SocketTransport(host, port, timeout_ms), fallback_simulation=fallback_simulation)
     def reset(self) -> None:
         self.write("*RST")
 
