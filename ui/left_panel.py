@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSpinBox,
+    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -33,6 +34,7 @@ from core.test_worker import TestWorker
 from devices.adb_client import AdbClient
 from devices.cmw500_controller import RealCMW500
 from devices.instrument_base import InstrumentBase
+from devices.instrument_transport import SocketTransport, VisaTransport
 
 
 LogCallback = Callable[[str, str], None]
@@ -238,7 +240,7 @@ class LeftPanel(QScrollArea):
         return group
 
     def _create_instrument_connection_group(self) -> QGroupBox:
-        group = QGroupBox("仪表连接")
+        group = QGroupBox("仪表连接配置")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(8, 14, 8, 8)
         layout.setSpacing(8)
@@ -250,31 +252,43 @@ class LeftPanel(QScrollArea):
         self.instrument_mode_combo = QComboBox()
         self.instrument_mode_combo.addItems(["Fake", "Real CMW500"])
         self.instrument_mode_combo.currentTextChanged.connect(self._on_instrument_mode_changed)
+        self.connection_type_combo = QComboBox()
+        self.connection_type_combo.addItems(["VISA（推荐）", "SOCKET", "SERIAL（预留）", "USBTMC（预留）"])
+        self.connection_type_combo.currentTextChanged.connect(self._on_connection_type_changed)
 
-        self.instrument_host_edit = QLineEdit("192.168.1.100")
+        self.visa_resource_edit = QLineEdit("TCPIP0::169.254.65.34::inst0::INSTR")
+        self.visa_timeout_spin = QSpinBox()
+        self.visa_timeout_spin.setRange(100, 600000)
+        self.visa_timeout_spin.setSuffix(" ms")
+        self.visa_timeout_spin.setValue(10000)
+
+        self.instrument_host_edit = QLineEdit("169.254.65.34")
         self.instrument_port_spin = QSpinBox()
         self.instrument_port_spin.setRange(1, 65535)
         self.instrument_port_spin.setValue(5025)
-
-        self.instrument_timeout_spin = QDoubleSpinBox()
-        self.instrument_timeout_spin.setRange(0.1, 60.0)
-        self.instrument_timeout_spin.setDecimals(1)
-        self.instrument_timeout_spin.setSingleStep(0.5)
-        self.instrument_timeout_spin.setSuffix(" s")
-        self.instrument_timeout_spin.setValue(5.0)
+        self.instrument_timeout_spin = QSpinBox()
+        self.instrument_timeout_spin.setRange(100, 600000)
+        self.instrument_timeout_spin.setSuffix(" ms")
+        self.instrument_timeout_spin.setValue(10000)
 
         self.instrument_status_label = QLabel("未连接")
 
         form.addRow("仪表模式：", self.instrument_mode_combo)
-        form.addRow("CMW500 IP：", self.instrument_host_edit)
-        form.addRow("端口：", self.instrument_port_spin)
-        form.addRow("超时：", self.instrument_timeout_spin)
+        form.addRow("连接方式：", self.connection_type_combo)
+        self.transport_stack = QStackedWidget()
+        self.transport_stack.addWidget(self._create_visa_form_widget())
+        self.transport_stack.addWidget(self._create_socket_form_widget())
+        self.transport_stack.addWidget(QLabel("SERIAL 模式预留（暂不可用）"))
+        self.transport_stack.addWidget(QLabel("USBTMC 模式预留（暂不可用）"))
+        form.addRow("连接参数：", self.transport_stack)
         form.addRow("状态：", self.instrument_status_label)
+        form.addRow("", QLabel("推荐：VISA / TCPIP INSTR，适合 CMW500 长时间自动化测试"))
+        form.addRow("", QLabel("备用：SOCKET / 5025，适合无 VISA 环境"))
 
         button_layout = QHBoxLayout()
         connect_button = QPushButton("连接仪表")
         disconnect_button = QPushButton("断开仪表")
-        idn_button = QPushButton("查询IDN")
+        idn_button = QPushButton("测试连接")
         connect_button.clicked.connect(lambda: self._connect_instrument())
         disconnect_button.clicked.connect(lambda: self._disconnect_instrument())
         idn_button.clicked.connect(lambda: self._query_instrument_idn())
@@ -285,6 +299,29 @@ class LeftPanel(QScrollArea):
         layout.addLayout(form)
         layout.addLayout(button_layout)
         return group
+
+    def _create_visa_form_widget(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        form = QFormLayout()
+        form.addRow("VISA Resource：", self.visa_resource_edit)
+        form.addRow("超时：", self.visa_timeout_spin)
+        button_layout = QHBoxLayout()
+        scan_button = QPushButton("扫描 VISA 设备")
+        scan_button.clicked.connect(self._scan_visa_resources)
+        button_layout.addWidget(scan_button)
+        button_layout.addStretch(1)
+        layout.addLayout(form)
+        layout.addLayout(button_layout)
+        return widget
+
+    def _create_socket_form_widget(self) -> QWidget:
+        widget = QWidget()
+        form = QFormLayout(widget)
+        form.addRow("IP 地址：", self.instrument_host_edit)
+        form.addRow("端口：", self.instrument_port_spin)
+        form.addRow("超时：", self.instrument_timeout_spin)
+        return widget
 
     def _create_placeholder_tab(self, titles: list[str]) -> QWidget:
         tab = QWidget()
@@ -624,6 +661,10 @@ class LeftPanel(QScrollArea):
         self.instrument_status_label.setText("未连接")
         self._log("INFO", f"仪表模式切换：{mode}")
 
+    def _on_connection_type_changed(self, mode: str) -> None:
+        index_map = {"VISA（推荐）": 0, "SOCKET": 1, "SERIAL（预留）": 2, "USBTMC（预留）": 3}
+        self.transport_stack.setCurrentIndex(index_map.get(mode, 0))
+
     def _connect_instrument(self) -> None:
         mode = self.instrument_mode_combo.currentText()
         self.instrument_mode = mode
@@ -635,33 +676,69 @@ class LeftPanel(QScrollArea):
             self._log("INFO", "Fake CMW500 已连接")
             return
 
-        host = self.instrument_host_edit.text().strip()
-        port = self.instrument_port_spin.value()
-        timeout = self.instrument_timeout_spin.value()
-        if not host:
-            self._log("ERROR", "请填写 CMW500 IP")
+        connection_type = self.connection_type_combo.currentText()
+        if connection_type == "VISA（推荐）":
+            resource = self.visa_resource_edit.text().strip()
+            if not resource:
+                self._log("ERROR", "请填写 VISA Resource")
+                return
+            transport = VisaTransport(resource, self.visa_timeout_spin.value())
+            desc = resource
+        elif connection_type == "SOCKET":
+            host = self.instrument_host_edit.text().strip()
+            if not host:
+                self._log("ERROR", "请填写 CMW500 IP")
+                return
+            transport = SocketTransport(host, self.instrument_port_spin.value(), self.instrument_timeout_spin.value())
+            desc = f"{host}:{self.instrument_port_spin.value()}"
+        else:
+            self._log("ERROR", "该连接方式暂未开放")
             return
 
-        instrument = RealCMW500(host, port, timeout)
+        instrument = RealCMW500(transport)
         if self.scpi_template_manager:
             instrument.set_scpi_template_manager(self.scpi_template_manager)
-        self.instrument_status_label.setText("连接中...")
+        self.instrument_status_label.setText("连接中")
 
         def action() -> tuple[bool, str, object | None]:
             instrument.connect()
-            return True, f"Real CMW500 已连接：{host}:{port}", instrument
+            idn = instrument.query("*IDN?")
+            return True, f"Real CMW500 已连接：{desc}，*IDN? -> {idn}", instrument
 
         def on_finished(success: bool, message: str, payload: object | None) -> None:
             if success and isinstance(payload, RealCMW500):
                 self.instrument = payload
-                self.instrument_status_label.setText("Real CMW500 已连接")
+                self.instrument_status_label.setText("已连接")
                 self._log("INFO", message)
                 if self.scpi_template_manager:
                     self._log("INFO", "已将 SCPI 模板绑定到 RealCMW500")
             else:
                 self.instrument = None
-                self.instrument_status_label.setText("连接失败")
+                self.instrument_status_label.setText(f"连接失败：{message}")
                 self._log("ERROR", f"Real CMW500 连接失败：{message}")
+
+        self._run_instrument_action(action, on_finished)
+
+    def _scan_visa_resources(self) -> None:
+        def action() -> tuple[bool, str, object | None]:
+            try:
+                import pyvisa
+            except ImportError as exc:
+                return False, f"缺少 pyvisa：{exc}", None
+            rm = pyvisa.ResourceManager()
+            try:
+                resources = rm.list_resources()
+            finally:
+                rm.close()
+            if not resources:
+                return True, "未扫描到 VISA 设备", None
+            return True, "扫描结果：" + "，".join(resources), None
+
+        def on_finished(success: bool, message: str, payload: object | None) -> None:
+            if success:
+                self._log("INFO", message)
+            else:
+                self._log("ERROR", message)
 
         self._run_instrument_action(action, on_finished)
 
