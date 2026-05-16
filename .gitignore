@@ -1,8 +1,13 @@
 .venv/
 .idea/
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.pyo
 *.log
+*.spec
+build/
+dist/
+release/
 cmw500_test_results_*.xlsx
 data/screenshots/

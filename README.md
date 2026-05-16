@@ -248,3 +248,31 @@ serial_ports:
 - 真实串口通信
 - 真实测试流程和真实仪表测量
 - 数据库存储
+
+## 自动构建与发布
+
+push 到 `main` 后，GitHub Actions 会自动执行基础检查并构建 Windows 绿色版压缩包。
+
+推送 `v*` 格式的 tag 后，会自动创建 GitHub Release，并上传对应的 Windows x64 绿色版构建产物。
+
+打 tag 示例：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+构建产物名称示例：
+
+```text
+CMW500AutoTest-v0.1.0-windows-x64.zip
+```
+
+本地构建命令：
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-build.txt
+python scripts/build_windows.py
+python scripts/package_release.py --version dev
+```
