@@ -32,7 +32,7 @@ jobs:
           pip install -r requirements-build.txt
 
       - name: Run tests
-        run: pytest -q
+        run: python -m pytest -q
 
       - name: Build Windows package directory
         run: python scripts/build_windows.py
