@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -26,6 +27,11 @@ from PySide6.QtWidgets import (
 )
 
 from core.channel_config import ChannelConfigManager
+from core.lte_channel_config import (
+    LTEChannelConfigError,
+    LTEChannelConfigManager,
+    default_lte_channel_config_path,
+)
 from core.fake_cmw500 import FakeCMW500
 from core.models import LteTestConfig
 from core.scpi_template import ScpiTemplateManager
@@ -76,6 +82,7 @@ class LeftPanel(QScrollArea):
         self.worker_thread: QThread | None = None
         self.worker: TestWorker | None = None
         self.channel_manager = ChannelConfigManager()
+        self.lte_channel_manager = LTEChannelConfigManager(default_lte_channel_config_path())
         self.serial_config_manager = SerialConfigManager()
         self.scpi_template_manager: ScpiTemplateManager | None = None
         self.adb_client = AdbClient()
@@ -84,11 +91,11 @@ class LeftPanel(QScrollArea):
         self.instrument_action_tasks: list[tuple[QThread, InstrumentActionWorker]] = []
         self._test_running = False
         self.band_checkboxes: dict[int, QCheckBox] = {}
-        self.channel_type_checkboxes: dict[str, QCheckBox] = {}
+        self.lte_test_item_radios: dict[str, QRadioButton] = {}
+        self.lte_test_item_group: QButtonGroup | None = None
         self.device_combo = QComboBox()
         self.app_path_edit = QLineEdit()
         self.package_name_edit = QLineEdit()
-        self.custom_channel_edit = QLineEdit()
         self.start_button: QPushButton | None = None
         self.pause_button: QPushButton | None = None
         self.stop_button: QPushButton | None = None
@@ -114,6 +121,7 @@ class LeftPanel(QScrollArea):
 
         self.setWidget(container)
         self._restore_last_instrument_resource()
+        self._init_lte_channel_config()
 
     def set_logger(self, logger: LogCallback) -> None:
         self._logger = logger
@@ -197,22 +205,22 @@ class LeftPanel(QScrollArea):
         return group
 
     def _create_lte_channel_group(self) -> QGroupBox:
-        group = QGroupBox("测试信道选择")
+        group = QGroupBox("测试项选择")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(8, 14, 8, 8)
 
-        grid = QGridLayout()
-        names = ["Top频点", "高频点", "中频点", "低频点", "自定义频点"]
-        for index, name in enumerate(names):
-            checkbox = QCheckBox(name)
-            checkbox.setChecked(name in {"高频点", "中频点", "低频点"})
-            self.channel_type_checkboxes[name] = checkbox
-            grid.addWidget(checkbox, index // 2, index % 2)
+        self.lte_test_item_group = QButtonGroup(self)
+        item_layout = QVBoxLayout()
+        test_items = ["固定信道测试", "转盘测试", "TOP测试", "三信道测试"]
+        for index, name in enumerate(test_items):
+            radio = QRadioButton(name)
+            if name == "固定信道测试":
+                radio.setChecked(True)
+            self.lte_test_item_radios[name] = radio
+            self.lte_test_item_group.addButton(radio)
+            item_layout.addWidget(radio)
 
-        self.custom_channel_edit.setPlaceholderText("例如：1300,1575,1850")
-
-        layout.addLayout(grid)
-        layout.addWidget(self.custom_channel_edit)
+        layout.addLayout(item_layout)
         return group
 
     def _create_lte_band_group(self) -> QGroupBox:
@@ -574,7 +582,7 @@ class LeftPanel(QScrollArea):
 
     def _load_config_file(self, label_text: str, path: str) -> None:
         if label_text == "信道配置文件":
-            self._load_channel_config_file(path)
+            self._load_lte_channel_config_file(path)
             return
         if label_text == "串口配置文件":
             self._load_serial_config_file(path)
@@ -585,22 +593,42 @@ class LeftPanel(QScrollArea):
         display_path = path.strip() or "未选择文件"
         self._log("INFO", f"已加载 {label_text} 配置文件：{display_path}")
 
-    def _load_channel_config_file(self, path: str) -> None:
+    def _init_lte_channel_config(self) -> None:
+        default_path = default_lte_channel_config_path()
+        self.channel_file_edit.setText(str(default_path))
+        try:
+            self.lte_channel_manager.ensure_default_file()
+            self.lte_channel_manager.load()
+            bands = self.lte_channel_manager.get_all_bands()
+            self._log("INFO", f"已加载 LTE 信道配置：{self.lte_channel_manager.path}")
+            self._log("INFO", f"已配置 Band：{', '.join(bands)}")
+            self._auto_select_configured_bands(bands)
+        except LTEChannelConfigError as exc:
+            self._log("ERROR", str(exc))
+        except Exception as exc:
+            self._log("ERROR", f"LTE 信道配置加载失败：{exc}")
+
+    def _load_lte_channel_config_file(self, path: str) -> None:
         config_path = path.strip()
         if not config_path:
-            self._log("ERROR", "请选择信道配置文件")
+            self._log("ERROR", "请选择 LTE 信道配置文件")
             return
 
         try:
-            self.channel_manager.load_excel(config_path)
+            self.lte_channel_manager.load(config_path)
+        except LTEChannelConfigError as exc:
+            self._log("ERROR", str(exc))
+            QMessageBox.warning(self, "配置加载失败", str(exc))
+            return
         except Exception as exc:
-            self._log("ERROR", f"信道配置文件加载失败：{exc}")
+            self._log("ERROR", f"LTE 信道配置文件加载失败：{exc}")
+            QMessageBox.warning(self, "配置加载失败", f"LTE 信道配置文件加载失败：{exc}")
             return
 
-        supported_bands = self.channel_manager.get_supported_bands("LTE")
-        self._log("INFO", f"已加载信道配置文件：{config_path}")
-        self._log("INFO", f"LTE支持Band数量：{len(supported_bands)}")
-        checked_bands = self._check_loaded_lte_bands(supported_bands)
+        bands = self.lte_channel_manager.get_all_bands()
+        self._log("INFO", f"已加载 LTE 信道配置：{config_path}")
+        self._log("INFO", f"已配置 Band：{', '.join(bands)}")
+        checked_bands = self._auto_select_configured_bands(bands)
         if checked_bands:
             self._log("INFO", f"已自动勾选 LTE Band：{', '.join(checked_bands)}")
 
@@ -887,23 +915,17 @@ class LeftPanel(QScrollArea):
         checked = self.mode_group.checkedButton()
         return checked.text() if checked else "单主"
 
+    def _current_lte_test_item(self) -> str:
+        if self.lte_test_item_group:
+            button = self.lte_test_item_group.checkedButton()
+            if button:
+                return button.text()
+        return "固定信道测试"
+
     def collect_lte_config(self) -> LteTestConfig:
         selected_bands = [
             f"B{band}" for band, checkbox in self.band_checkboxes.items() if checkbox.isChecked()
         ]
-        selected_channel_types = [
-            name for name, checkbox in self.channel_type_checkboxes.items() if checkbox.isChecked()
-        ]
-
-        custom_channels: list[int] = []
-        raw_custom_channels = self.custom_channel_edit.text().strip()
-        if raw_custom_channels:
-            try:
-                custom_channels = [
-                    int(value.strip()) for value in raw_custom_channels.split(",") if value.strip()
-                ]
-            except ValueError:
-                self._log("WARNING", "自定义频点格式错误，已忽略")
 
         return LteTestConfig(
             cable_loss=self.cable_loss_spin.value(),
@@ -917,10 +939,45 @@ class LeftPanel(QScrollArea):
             settle_time=self.settle_time_spin.value(),
             retry_count=self.retry_count_spin.value(),
             selected_bands=selected_bands,
-            selected_channel_types=selected_channel_types,
-            custom_channels=custom_channels,
+            selected_channel_types=[],
+            custom_channels=[],
+            lte_test_item=self._current_lte_test_item(),
             test_mode=self._current_test_mode(),
         )
+
+    def _validate_lte_channel_config(self, config: LteTestConfig) -> bool:
+        if not config.selected_bands:
+            QMessageBox.warning(self, "提示", "请至少选择一个 Band")
+            return False
+
+        if not self.lte_channel_manager.has_config():
+            QMessageBox.warning(self, "提示", "LTE 信道配置未加载，请检查配置文件")
+            return False
+
+        for band in config.selected_bands:
+            try:
+                self.lte_channel_manager.get_band_config(band)
+            except KeyError:
+                message = f"未找到 Band 配置：{band}"
+                self._log("ERROR", message)
+                QMessageBox.warning(self, "提示", message)
+                return False
+
+            try:
+                selection = self.lte_channel_manager.get_channels_for_test_item(
+                    band, config.lte_test_item
+                )
+            except ValueError as exc:
+                self._log("ERROR", str(exc))
+                QMessageBox.warning(self, "提示", str(exc))
+                return False
+
+            self._log(
+                "INFO",
+                f"{band} {config.lte_test_item}: bw={selection.bw:g}, channels={selection.channels}",
+            )
+
+        return True
 
     def _start_test(self) -> None:
         if self._test_running:
@@ -928,12 +985,15 @@ class LeftPanel(QScrollArea):
             return
 
         config = self.collect_lte_config()
+        if not self._validate_lte_channel_config(config):
+            return
+
         instrument = self._prepare_instrument_for_test()
         if not instrument:
             return
 
         self.worker_thread = QThread(self)
-        self.worker = TestWorker(config, self.channel_manager, instrument)
+        self.worker = TestWorker(config, self.lte_channel_manager, instrument)
         self.worker.moveToThread(self.worker_thread)
 
         self.worker_thread.started.connect(self.worker.run)
@@ -1070,7 +1130,7 @@ class LeftPanel(QScrollArea):
             return None
         return self.instrument
 
-    def _check_loaded_lte_bands(self, supported_bands: list[str]) -> list[str]:
+    def _auto_select_configured_bands(self, supported_bands: list[str]) -> list[str]:
         checked_bands: list[str] = []
         for band in supported_bands:
             try:

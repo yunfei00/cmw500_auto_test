@@ -18,6 +18,7 @@ class LteTestConfig:
     selected_bands: list[str]
     selected_channel_types: list[str]
     custom_channels: list[int]
+    lte_test_item: str
     test_mode: str
 
 
@@ -30,6 +31,7 @@ class TestItem:
     channel_type: str
     test_mode: str
     rx_level: float
+    bw: float | None = None
 
 
 @dataclass

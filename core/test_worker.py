@@ -5,7 +5,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, QMutex, QMutexLocker, QTime, Signal
 
-from core.channel_config import ChannelConfigManager
+from core.lte_channel_config import LTEChannelConfigManager
 from core.fake_cmw500 import FakeCMW500
 from core.models import LteTestConfig, TestItem, TestResult
 from core.result_judge import judge_bler
@@ -24,12 +24,12 @@ class TestWorker(QObject):
     def __init__(
         self,
         config: LteTestConfig,
-        channel_manager: ChannelConfigManager | None = None,
+        lte_channel_manager: LTEChannelConfigManager | None = None,
         instrument: InstrumentBase | None = None,
     ) -> None:
         super().__init__()
         self.config = config
-        self.channel_manager = channel_manager
+        self.lte_channel_manager = lte_channel_manager
         self.test_plan: list[TestItem] = []
         self.instrument = instrument or FakeCMW500()
         self.current_state = TestState.IDLE
@@ -54,7 +54,7 @@ class TestWorker(QObject):
 
             self._log_real_instrument_template_state()
             self.log_signal.emit("INFO", "开始生成 LTE 测试计划")
-            self.test_plan = generate_lte_test_plan(self.config, self.channel_manager)
+            self.test_plan = generate_lte_test_plan(self.config, self.lte_channel_manager)
             total = len(self.test_plan)
             self.log_signal.emit("INFO", f"共生成 {total} 条测试项")
             if total == 0:
