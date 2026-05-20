@@ -18,7 +18,7 @@ class LteTestConfig:
     selected_bands: list[str]
     selected_channel_types: list[str]
     custom_channels: list[int]
-    lte_test_item: str
+    lte_test_items: list[str]
     test_mode: str
 
 

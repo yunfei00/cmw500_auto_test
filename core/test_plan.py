@@ -12,29 +12,29 @@ def generate_lte_test_plan(
         return []
 
     bands = config.selected_bands or []
-    test_item = config.lte_test_item
     levels = _generate_levels(config.start_level, config.stop_level, config.min_step)
     items: list[TestItem] = []
     index = 1
 
     for band in bands:
-        selection = lte_channel_manager.get_channels_for_test_item(band, test_item)
-        channel_type = _channel_type_label(test_item, selection)
-        for channel in selection.channels:
-            for level in levels:
-                items.append(
-                    TestItem(
-                        index=index,
-                        mode="LTE",
-                        band=band,
-                        channel=channel,
-                        channel_type=channel_type,
-                        test_mode=config.test_mode,
-                        rx_level=level,
-                        bw=selection.bw,
+        selections = lte_channel_manager.get_band_test_selections(band, config.lte_test_items)
+        for test_item_name, selection in selections:
+            channel_type = _channel_type_label(test_item_name, selection)
+            for channel in selection.channels:
+                for level in levels:
+                    items.append(
+                        TestItem(
+                            index=index,
+                            mode="LTE",
+                            band=band,
+                            channel=channel,
+                            channel_type=channel_type,
+                            test_mode=config.test_mode,
+                            rx_level=level,
+                            bw=selection.bw,
+                        )
                     )
-                )
-                index += 1
+                    index += 1
 
     return items
 

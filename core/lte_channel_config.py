@@ -252,6 +252,26 @@ class LTEChannelConfigManager:
             raise KeyError(band_key)
         return config
 
+    def get_fixed_channel_selection(self, band: str) -> LteTestChannelSelection | None:
+        config = self.get_band_config(band)
+        channels = config.resolved_fixed_channels()
+        if not channels:
+            return None
+        return LteTestChannelSelection(bw=config.bw, channels=channels, loss_db=config.loss_db)
+
+    def get_band_test_selections(
+        self,
+        band: str,
+        optional_test_items: list[str],
+    ) -> list[tuple[str, LteTestChannelSelection]]:
+        selections: list[tuple[str, LteTestChannelSelection]] = []
+        fixed = self.get_fixed_channel_selection(band)
+        if fixed is not None:
+            selections.append(("固定信道", fixed))
+        for test_item in optional_test_items:
+            selections.append((test_item, self.get_channels_for_test_item(band, test_item)))
+        return selections
+
     def get_channels_for_test_item(self, band: str, test_item: str) -> LteTestChannelSelection:
         config = self.get_band_config(band)
         item = test_item.strip()

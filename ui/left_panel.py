@@ -91,8 +91,7 @@ class LeftPanel(QScrollArea):
         self.instrument_action_tasks: list[tuple[QThread, InstrumentActionWorker]] = []
         self._test_running = False
         self.band_checkboxes: dict[int, QCheckBox] = {}
-        self.lte_test_item_radios: dict[str, QRadioButton] = {}
-        self.lte_test_item_group: QButtonGroup | None = None
+        self.lte_test_item_checkboxes: dict[str, QCheckBox] = {}
         self.device_combo = QComboBox()
         self.app_path_edit = QLineEdit()
         self.package_name_edit = QLineEdit()
@@ -209,18 +208,18 @@ class LeftPanel(QScrollArea):
         layout = QVBoxLayout(group)
         layout.setContentsMargins(8, 14, 8, 8)
 
-        self.lte_test_item_group = QButtonGroup(self)
-        item_layout = QVBoxLayout()
-        test_items = ["固定信道测试", "转盘测试", "TOP测试", "三信道测试"]
-        for index, name in enumerate(test_items):
-            radio = QRadioButton(name)
-            if name == "固定信道测试":
-                radio.setChecked(True)
-            self.lte_test_item_radios[name] = radio
-            self.lte_test_item_group.addButton(radio)
-            item_layout.addWidget(radio)
+        hint = QLabel("固定信道由 Excel「固定信道」列自动决定，无需勾选")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
-        layout.addLayout(item_layout)
+        grid = QGridLayout()
+        test_items = ["转盘测试", "TOP测试", "三信道测试"]
+        for index, name in enumerate(test_items):
+            checkbox = QCheckBox(name)
+            self.lte_test_item_checkboxes[name] = checkbox
+            grid.addWidget(checkbox, index // 2, index % 2)
+
+        layout.addLayout(grid)
         return group
 
     def _create_lte_band_group(self) -> QGroupBox:
@@ -915,12 +914,12 @@ class LeftPanel(QScrollArea):
         checked = self.mode_group.checkedButton()
         return checked.text() if checked else "单主"
 
-    def _current_lte_test_item(self) -> str:
-        if self.lte_test_item_group:
-            button = self.lte_test_item_group.checkedButton()
-            if button:
-                return button.text()
-        return "固定信道测试"
+    def _selected_lte_test_items(self) -> list[str]:
+        return [
+            name
+            for name, checkbox in self.lte_test_item_checkboxes.items()
+            if checkbox.isChecked()
+        ]
 
     def collect_lte_config(self) -> LteTestConfig:
         selected_bands = [
@@ -941,7 +940,7 @@ class LeftPanel(QScrollArea):
             selected_bands=selected_bands,
             selected_channel_types=[],
             custom_channels=[],
-            lte_test_item=self._current_lte_test_item(),
+            lte_test_items=self._selected_lte_test_items(),
             test_mode=self._current_test_mode(),
         )
 
@@ -964,20 +963,54 @@ class LeftPanel(QScrollArea):
                 return False
 
             try:
-                selection = self.lte_channel_manager.get_channels_for_test_item(
-                    band, config.lte_test_item
+                selections = self.lte_channel_manager.get_band_test_selections(
+                    band, config.lte_test_items
                 )
             except ValueError as exc:
                 self._log("ERROR", str(exc))
                 QMessageBox.warning(self, "提示", str(exc))
                 return False
 
-            self._log(
-                "INFO",
-                f"{band} {config.lte_test_item}: bw={selection.bw:g}, channels={selection.channels}",
-            )
+            if not selections:
+                message = (
+                    f"{band} 未配置任何测试信道，"
+                    "请检查 Excel「固定信道」列或勾选测试项"
+                )
+                self._log("ERROR", message)
+                QMessageBox.warning(self, "提示", message)
+                return False
 
         return True
+
+    def _log_test_channel_summary(self, config: LteTestConfig) -> None:
+        self._log("INFO", "======== 本次测试信道信息 ========")
+        optional_items = config.lte_test_items
+        if optional_items:
+            self._log("INFO", f"已勾选测试项：{', '.join(optional_items)}")
+        else:
+            self._log("INFO", "已勾选测试项：无（仅使用 Excel 固定信道）")
+
+        for band in config.selected_bands:
+            self._log("INFO", f"--- {band} ---")
+            fixed = self.lte_channel_manager.get_fixed_channel_selection(band)
+            if fixed is not None:
+                self._log(
+                    "INFO",
+                    f"  固定信道: bw={fixed.bw:g} MHz, channels={fixed.channels}",
+                )
+            else:
+                self._log("INFO", "  固定信道: 未配置")
+
+            for test_item in optional_items:
+                selection = self.lte_channel_manager.get_channels_for_test_item(
+                    band, test_item
+                )
+                self._log(
+                    "INFO",
+                    f"  {test_item}: bw={selection.bw:g} MHz, channels={selection.channels}",
+                )
+
+        self._log("INFO", "==================================")
 
     def _start_test(self) -> None:
         if self._test_running:
@@ -987,6 +1020,8 @@ class LeftPanel(QScrollArea):
         config = self.collect_lte_config()
         if not self._validate_lte_channel_config(config):
             return
+
+        self._log_test_channel_summary(config)
 
         instrument = self._prepare_instrument_for_test()
         if not instrument:
