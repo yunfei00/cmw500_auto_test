@@ -12,29 +12,50 @@ def generate_lte_test_plan(
         return []
 
     bands = config.selected_bands or []
-    levels = _generate_levels(config.start_level, config.stop_level, config.min_step)
     items: list[TestItem] = []
     index = 1
+
+    if config.data:
+        for row in config.data:
+            band = str(row.get("band", "")).strip()
+            channel_raw = row.get("channel")
+            if not band or channel_raw is None:
+                continue
+
+            channel = int(channel_raw)
+            items.append(
+                TestItem(
+                    index=index,
+                    mode="LTE",
+                    band=band,
+                    channel=channel,
+                    channel_type=str(row.get("desc", "")) or "固定信道",
+                    test_mode=config.test_mode,
+                    rx_level=config.start_level,
+                    bw=_parse_optional_float(row.get("bw")),
+                )
+            )
+            index += 1
+        return items
 
     for band in bands:
         selections = lte_channel_manager.get_band_test_selections(band, config.lte_test_items)
         for test_item_name, selection in selections:
             channel_type = _channel_type_label(test_item_name, selection)
             for channel in selection.channels:
-                for level in levels:
-                    items.append(
-                        TestItem(
-                            index=index,
-                            mode="LTE",
-                            band=band,
-                            channel=channel,
-                            channel_type=channel_type,
-                            test_mode=config.test_mode,
-                            rx_level=level,
-                            bw=selection.bw,
-                        )
+                items.append(
+                    TestItem(
+                        index=index,
+                        mode="LTE",
+                        band=band,
+                        channel=channel,
+                        channel_type=channel_type,
+                        test_mode=config.test_mode,
+                        rx_level=config.start_level,
+                        bw=selection.bw,
                     )
-                    index += 1
+                )
+                index += 1
 
     return items
 
@@ -45,19 +66,7 @@ def _channel_type_label(test_item: str, selection: LteTestChannelSelection) -> s
     return test_item
 
 
-def _generate_levels(start_level: float, stop_level: float, min_step: float) -> list[float]:
-    step = abs(min_step) if min_step else 1.0
-    step = step or 1.0
-
-    levels: list[float] = []
-    current = start_level
-    if start_level >= stop_level:
-        while current >= stop_level:
-            levels.append(round(current, 2))
-            current -= step
-    else:
-        while current <= stop_level:
-            levels.append(round(current, 2))
-            current += step
-
-    return levels
+def _parse_optional_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
