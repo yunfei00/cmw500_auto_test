@@ -216,6 +216,7 @@ class LeftPanel(QScrollArea):
         test_items = ["转盘测试", "TOP测试", "三信道测试"]
         for index, name in enumerate(test_items):
             checkbox = QCheckBox(name)
+            checkbox.setChecked(name == "三信道测试")
             self.lte_test_item_checkboxes[name] = checkbox
             grid.addWidget(checkbox, index // 2, index % 2)
 
