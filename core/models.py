@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -20,6 +20,7 @@ class LteTestConfig:
     custom_channels: list[int]
     lte_test_items: list[str]
     test_mode: str
+    data: list[dict[str, str | int | float]] = field(default_factory=list)
 
 
 @dataclass
