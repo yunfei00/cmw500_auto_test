@@ -925,6 +925,25 @@ class LeftPanel(QScrollArea):
         selected_bands = [
             f"B{band}" for band, checkbox in self.band_checkboxes.items() if checkbox.isChecked()
         ]
+        data: list[dict[str, str | int | float]] = []
+        if self.lte_channel_manager.has_config():
+            for band in selected_bands:
+                try:
+                    selections = self.lte_channel_manager.get_band_test_selections(
+                        band, self._selected_lte_test_items()
+                    )
+                except (KeyError, ValueError):
+                    continue
+                for test_item_name, selection in selections:
+                    for channel in selection.channels:
+                        data.append(
+                            {
+                                "band": band,
+                                "channel": channel,
+                                "bw": selection.bw,
+                                "desc": test_item_name,
+                            }
+                        )
 
         return LteTestConfig(
             cable_loss=self.cable_loss_spin.value(),
@@ -942,6 +961,7 @@ class LeftPanel(QScrollArea):
             custom_channels=[],
             lte_test_items=self._selected_lte_test_items(),
             test_mode=self._current_test_mode(),
+            data=data,
         )
 
     def _validate_lte_channel_config(self, config: LteTestConfig) -> bool:
