@@ -6,33 +6,36 @@ instrument:
 lte:
   setup:
     - "INST LTE"
-    - "CONFigure:LTE:SIGN:BAND {band_number}"
+    - "CONFigure:LTE:SIGN:PCC:BAND OB{band_number}"
+    - "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:DL 20"
     - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
 
   cell_on:
     - "CALL:LTE:SIGN:PSWitched:STATe ON"
 
   wait_attach:
-    query: "FETCh:LTE:SIGN:PSWitched:STATe?"
+    query: "SENSe:LTE:SIGN:RRCState?"
     parser: "contains"
-    expected: "ATT"
-    interval_sec: 1.0
+    expected: "CONN"
+    interval_sec: 0.2
     timeout_sec: 30.0
     fallback_success: false
-
-  before_measure:
-    - "SYST:ERR?"
 
   set_rx_level:
     - "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
 
   measure_bler:
-    query: "FETCh:LTE:SIGN:BLER?"
-    parser: "first_float"
+    start:
+      - "INITiate:LTE:SIGN:EBLer"
+    state_query: "FETCh:LTE:SIGN:EBLer:STATe?"
+    state_done: "RDY"
+    state_interval_sec: 0.05
+    state_timeout_sec: 8.0
+    stop:
+      - "STOP:LTE:SIGN:EBLer"
+    query: "FETCh:LTE:SIGN:EBLer:RELative?"
+    parser: "csv_index:3"
     fallback_simulation: true
-
-  after_measure:
-    - "SYST:ERR?"
 
   cell_off:
     - "CALL:LTE:SIGN:PSWitched:STATe OFF"

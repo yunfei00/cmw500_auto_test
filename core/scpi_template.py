@@ -12,6 +12,12 @@ class ScpiMeasureConfig:
     query: str
     parser: str = "first_float"
     fallback_simulation: bool = True
+    start: list[str] = field(default_factory=list)
+    state_query: str = ""
+    state_done: str = ""
+    state_interval_sec: float = 0.05
+    state_timeout_sec: float = 10.0
+    stop: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -139,6 +145,12 @@ class ScpiTemplateManager:
                 query=str(measure_data["query"]),
                 parser=str(measure_data.get("parser", "first_float")),
                 fallback_simulation=bool(measure_data.get("fallback_simulation", True)),
+                start=self._as_command_list(measure_data.get("start", []), "lte.measure_bler.start"),
+                state_query=str(measure_data.get("state_query", "")),
+                state_done=str(measure_data.get("state_done", "")),
+                state_interval_sec=float(measure_data.get("state_interval_sec", 0.05)),
+                state_timeout_sec=float(measure_data.get("state_timeout_sec", 10.0)),
+                stop=self._as_command_list(measure_data.get("stop", []), "lte.measure_bler.stop"),
             ),
             after_measure=self._as_command_list(
                 lte_data.get("after_measure", []),

@@ -90,8 +90,13 @@ class TestWorker(QObject):
                         self._emit_instrument_warning()
                         self.log_signal.emit("INFO", "LTE Cell ON")
 
-                        self.set_state(TestState.ATTACHED, "状态切换：ATTACHED - 跳过 Attach 检查")
-                        self.log_signal.emit("INFO", "已跳过 UE Attach 检查")
+                        self.set_state(TestState.WAITING_ATTACH, "状态切换：WAITING_ATTACH - 等待 UE Attach")
+                        if not self._call_wait_for_attach():
+                            self._emit_instrument_warning()
+                            raise RuntimeError("UE Attach 检查失败或超时")
+                        self._emit_instrument_warning()
+                        self.set_state(TestState.ATTACHED, "状态切换：ATTACHED - UE 已连接")
+                        self.log_signal.emit("INFO", "UE Attach 检查通过")
                         self._run_before_measure()
                         self.last_cell_key = cell_key
                     except Exception as exc:
