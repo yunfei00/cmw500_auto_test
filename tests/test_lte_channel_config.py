@@ -57,10 +57,7 @@ def test_get_fixed_and_optional_channels(tmp_path: Path) -> None:
     manager = LTEChannelConfigManager(config_path)
     manager.load()
 
-    fixed = manager.get_fixed_channel_selection("B3")
-    assert fixed is not None
-    assert fixed.bw == 20
-    assert fixed.channels == [1200, 1575, 1949]
+    assert manager.get_fixed_channel_selection("B3") is None
 
     turntable = manager.get_channels_for_test_item("B3", "转盘测试")
     assert turntable.bw == 20
@@ -75,19 +72,17 @@ def test_get_fixed_and_optional_channels(tmp_path: Path) -> None:
     assert three.channels == [1200, 1575, 1949]
 
 
-def test_get_band_test_selections_includes_fixed_by_default(tmp_path: Path) -> None:
+def test_get_band_test_selections_follow_fixed_column(tmp_path: Path) -> None:
     config_path = tmp_path / "lte_channel_config.xlsx"
     write_default_lte_channel_excel(config_path)
     manager = LTEChannelConfigManager(config_path)
     manager.load()
 
     selections = manager.get_band_test_selections("B3", [])
-    assert len(selections) == 1
-    assert selections[0][0] == "固定信道"
-    assert selections[0][1].channels == [1200, 1575, 1949]
+    assert selections == []
 
     multi = manager.get_band_test_selections("B3", ["转盘测试", "TOP测试"])
-    assert [name for name, _ in multi] == ["固定信道", "转盘测试", "TOP测试"]
+    assert [name for name, _ in multi] == ["转盘测试", "TOP测试"]
 
 
 def test_missing_band_raises_key_error(tmp_path: Path) -> None:
@@ -123,7 +118,7 @@ def test_empty_test_item_channels_raises_value_error(tmp_path: Path) -> None:
         "三信道",
     ]
     sheet.append(headers)
-    sheet.append(["B9", "", "", "", "", 1.0, 20, 20, "", 10, "", 20, ""])
+    sheet.append(["B9", "是", "", "", "", 1.0, 20, 20, "", 10, "", 20, ""])
     workbook.save(config_path)
 
     manager = LTEChannelConfigManager(config_path)
@@ -156,13 +151,12 @@ def test_generate_channels_from_begin_end_step(tmp_path: Path) -> None:
         "三信道",
     ]
     sheet.append(headers)
-    sheet.append(["B7", "", 2750, 2760, 5, 1.0, 20, 20, 3100, 10, 3449, 20, ""])
+    sheet.append(["B7", "否", 2750, 2760, 5, 1.0, 20, 20, 3100, 10, 3449, 20, ""])
     workbook.save(config_path)
 
     manager = LTEChannelConfigManager(config_path)
     manager.load()
-    selection = manager.get_fixed_channel_selection("B7")
-    assert selection is not None
+    selection = manager.get_channels_for_test_item("B7", "普通测试")
     assert selection.channels == [2750, 2755, 2760]
 
 
@@ -174,7 +168,7 @@ def test_missing_headers_raises(tmp_path: Path) -> None:
     sheet = workbook.active
     sheet.title = "LTE"
     sheet.append(["band", "固定信道"])
-    sheet.append(["B1", "0,300,599"])
+    sheet.append(["B1", "是"])
     workbook.save(config_path)
 
     manager = LTEChannelConfigManager(config_path)
@@ -195,9 +189,7 @@ def test_generate_lte_test_plan_from_excel(tmp_path: Path) -> None:
         stop_level=-70.0,
     )
     items = generate_lte_test_plan(config, manager)
-    assert len(items) == 3
-    assert sorted(item.channel for item in items) == [1200, 1575, 1949]
-    assert all(item.bw == 20 for item in items)
+    assert len(items) == 0
 
     turntable_config = _sample_config(
         selected_bands=["B3"],
@@ -206,6 +198,6 @@ def test_generate_lte_test_plan_from_excel(tmp_path: Path) -> None:
         stop_level=-70.0,
     )
     turntable_items = generate_lte_test_plan(turntable_config, manager)
-    assert len(turntable_items) == 4
-    assert turntable_items[-1].channel == 1575
-    assert turntable_items[-1].channel_type == "转盘测试"
+    assert len(turntable_items) == 1
+    assert turntable_items[0].channel == 1575
+    assert turntable_items[0].channel_type == "转盘测试"

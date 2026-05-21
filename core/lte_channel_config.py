@@ -33,7 +33,7 @@ FIXED_CHANNEL_TEST_ITEMS = frozenset({"普通测试", "固定信道测试"})
 DEFAULT_BAND_ROWS: tuple[dict[str, Any], ...] = (
     {
         "band": "B1",
-        "固定信道": "0,300,599",
+        "固定信道": "是",
         "begin": "",
         "end": "",
         "step": "",
@@ -48,7 +48,7 @@ DEFAULT_BAND_ROWS: tuple[dict[str, Any], ...] = (
     },
     {
         "band": "B3",
-        "固定信道": "1200,1575,1949",
+        "固定信道": "是",
         "begin": "",
         "end": "",
         "step": "",
@@ -63,7 +63,7 @@ DEFAULT_BAND_ROWS: tuple[dict[str, Any], ...] = (
     },
     {
         "band": "B5",
-        "固定信道": "2400,2525,2649",
+        "固定信道": "是",
         "begin": "",
         "end": "",
         "step": "",
@@ -86,7 +86,7 @@ class LTEChannelConfigError(Exception):
 @dataclass
 class LTEBandChannelConfig:
     band: str
-    fixed_channels: list[int]
+    is_fixed_channel: bool
     begin: int | None
     end: int | None
     step: int | None
@@ -111,9 +111,7 @@ class LTEBandChannelConfig:
             current += self.step
         return channels
 
-    def resolved_fixed_channels(self) -> list[int]:
-        if self.fixed_channels:
-            return list(self.fixed_channels)
+    def resolved_traverse_channels(self) -> list[int]:
         return self.channels_from_range()
 
 
@@ -169,6 +167,27 @@ def parse_float_value(value: Any, default: float = 0.0) -> float:
         return float(text)
     except (TypeError, ValueError) as exc:
         raise LTEChannelConfigError(f"无法解析浮点数：{value}") from exc
+
+
+def parse_yes_no(value: Any) -> bool:
+    if value is None:
+        raise LTEChannelConfigError("固定信道列不能为空，应填写“是”或“否”。")
+    text = str(value).strip().lower()
+    mapping = {
+        "是": True,
+        "否": False,
+        "yes": True,
+        "no": False,
+        "y": True,
+        "n": False,
+        "true": True,
+        "false": False,
+        "1": True,
+        "0": False,
+    }
+    if text in mapping:
+        return mapping[text]
+    raise LTEChannelConfigError(f"固定信道列无法解析：{value}，请填写“是”或“否”。")
 
 
 def _normalize_header(value: Any) -> str:
@@ -253,11 +272,7 @@ class LTEChannelConfigManager:
         return config
 
     def get_fixed_channel_selection(self, band: str) -> LteTestChannelSelection | None:
-        config = self.get_band_config(band)
-        channels = config.resolved_fixed_channels()
-        if not channels:
-            return None
-        return LteTestChannelSelection(bw=config.bw, channels=channels, loss_db=config.loss_db)
+        return None
 
     def get_band_test_selections(
         self,
@@ -265,9 +280,10 @@ class LTEChannelConfigManager:
         optional_test_items: list[str],
     ) -> list[tuple[str, LteTestChannelSelection]]:
         selections: list[tuple[str, LteTestChannelSelection]] = []
-        fixed = self.get_fixed_channel_selection(band)
-        if fixed is not None:
-            selections.append(("固定信道", fixed))
+        config = self.get_band_config(band)
+        if not config.is_fixed_channel:
+            selections.append(("普通测试", self.get_channels_for_test_item(band, "普通测试")))
+            return selections
         for test_item in optional_test_items:
             selections.append((test_item, self.get_channels_for_test_item(band, test_item)))
         return selections
@@ -279,7 +295,7 @@ class LTEChannelConfigManager:
             raise ValueError("当前 Band 未配置该测试项信道。")
 
         if item in FIXED_CHANNEL_TEST_ITEMS:
-            channels = config.resolved_fixed_channels()
+            channels = config.resolved_traverse_channels()
             if not channels:
                 raise ValueError("当前 Band 未配置该测试项信道。")
             return LteTestChannelSelection(bw=config.bw, channels=channels, loss_db=config.loss_db)
@@ -337,7 +353,7 @@ class LTEChannelConfigManager:
 
         try:
             band = normalize_band(band_value)
-            fixed_channels = parse_int_list(self._value_at(row, header_map["固定信道"]))
+            is_fixed_channel = parse_yes_no(self._value_at(row, header_map["固定信道"]))
             begin = parse_optional_int(self._value_at(row, header_map["begin"]))
             end = parse_optional_int(self._value_at(row, header_map["end"]))
             step = parse_optional_int(self._value_at(row, header_map["step"]))
@@ -354,7 +370,7 @@ class LTEChannelConfigManager:
 
         return LTEBandChannelConfig(
             band=band,
-            fixed_channels=fixed_channels,
+            is_fixed_channel=is_fixed_channel,
             begin=begin,
             end=end,
             step=step,
