@@ -160,6 +160,40 @@ def test_generate_channels_from_begin_end_step(tmp_path: Path) -> None:
     assert selection.channels == [2750, 2755, 2760]
 
 
+def test_supports_comma_separated_channels_in_each_column(tmp_path: Path) -> None:
+    from openpyxl import Workbook
+
+    config_path = tmp_path / "multi_columns.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "LTE"
+    headers = [
+        "band",
+        "固定信道",
+        "begin",
+        "end",
+        "step",
+        "线损",
+        "bw",
+        "转盘bw",
+        "转盘",
+        "top bw",
+        "top",
+        "三信道bw",
+        "三信道",
+    ]
+    sheet.append(headers)
+    sheet.append(["B8", "是", "", "", "", 1.0, 20, 20, "3400,3500,3600", 10, "3410,3510,3610", 20, "3420,3520,3620"])
+    workbook.save(config_path)
+
+    manager = LTEChannelConfigManager(config_path)
+    manager.load()
+
+    assert manager.get_channels_for_test_item("B8", "转盘测试").channels == [3400, 3500, 3600]
+    assert manager.get_channels_for_test_item("B8", "TOP测试").channels == [3410, 3510, 3610]
+    assert manager.get_channels_for_test_item("B8", "三信道测试").channels == [3420, 3520, 3620]
+
+
 def test_missing_headers_raises(tmp_path: Path) -> None:
     from openpyxl import Workbook
 

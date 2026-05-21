@@ -93,9 +93,9 @@ class LTEBandChannelConfig:
     loss_db: float
     bw: float
     turntable_bw: float
-    turntable_channel: int | None
+    turntable_channels: list[int]
     top_bw: float
-    top_channel: int | None
+    top_channels: list[int]
     three_channel_bw: float
     three_channels: list[int]
 
@@ -155,6 +155,10 @@ def parse_optional_int(value: Any) -> int | None:
         return int(float(text))
     except (TypeError, ValueError) as exc:
         raise LTEChannelConfigError(f"无法解析整数：{value}") from exc
+
+
+def parse_optional_int_list(value: Any) -> list[int]:
+    return parse_int_list(value)
 
 
 def parse_float_value(value: Any, default: float = 0.0) -> float:
@@ -301,20 +305,20 @@ class LTEChannelConfigManager:
             return LteTestChannelSelection(bw=config.bw, channels=channels, loss_db=config.loss_db)
 
         if item == "转盘测试":
-            if config.turntable_channel is None:
+            if not config.turntable_channels:
                 raise ValueError("当前 Band 未配置该测试项信道。")
             return LteTestChannelSelection(
                 bw=config.turntable_bw,
-                channels=[config.turntable_channel],
+                channels=list(config.turntable_channels),
                 loss_db=config.loss_db,
             )
 
         if item == "TOP测试":
-            if config.top_channel is None:
+            if not config.top_channels:
                 raise ValueError("当前 Band 未配置该测试项信道。")
             return LteTestChannelSelection(
                 bw=config.top_bw,
-                channels=[config.top_channel],
+                channels=list(config.top_channels),
                 loss_db=config.loss_db,
             )
 
@@ -360,9 +364,9 @@ class LTEChannelConfigManager:
             loss_db = parse_float_value(self._value_at(row, header_map["线损"]))
             bw = parse_float_value(self._value_at(row, header_map["bw"]))
             turntable_bw = parse_float_value(self._value_at(row, header_map["转盘bw"]))
-            turntable_channel = parse_optional_int(self._value_at(row, header_map["转盘"]))
+            turntable_channels = parse_optional_int_list(self._value_at(row, header_map["转盘"]))
             top_bw = parse_float_value(self._value_at(row, header_map["top bw"]))
-            top_channel = parse_optional_int(self._value_at(row, header_map["top"]))
+            top_channels = parse_optional_int_list(self._value_at(row, header_map["top"]))
             three_channel_bw = parse_float_value(self._value_at(row, header_map["三信道bw"]))
             three_channels = parse_int_list(self._value_at(row, header_map["三信道"]))
         except (LTEChannelConfigError, ValueError) as exc:
@@ -377,9 +381,9 @@ class LTEChannelConfigManager:
             loss_db=loss_db,
             bw=bw,
             turntable_bw=turntable_bw,
-            turntable_channel=turntable_channel,
+            turntable_channels=turntable_channels,
             top_bw=top_bw,
-            top_channel=top_channel,
+            top_channels=top_channels,
             three_channel_bw=three_channel_bw,
             three_channels=three_channels,
         )
