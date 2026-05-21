@@ -280,18 +280,40 @@ class RealCMW500(InstrumentBase):
             test_mode=self.current_test_mode,
         )
         try:
+            self.execute_template_commands(measure_config.start, context, "measure_bler.start")
+            if measure_config.state_query:
+                deadline = time.monotonic() + max(float(measure_config.state_timeout_sec), 0.0)
+                interval = max(float(measure_config.state_interval_sec), 0.01)
+                done_text = measure_config.state_done.strip()
+                while True:
+                    state_command = self.scpi_template_manager.render_command(measure_config.state_query, context)
+                    state_response = self.query(state_command)
+                    self.last_commands.append(state_command)
+                    if done_text and done_text in state_response:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(
+                            f"BLER 测量状态等待超时：query={state_command}, response={state_response}"
+                        )
+                    time.sleep(min(interval, max(deadline - time.monotonic(), 0.0)))
             command = self.scpi_template_manager.render_command(measure_config.query, context)
             response = self.query(command)
             self.last_commands.append(command)
-            return self.scpi_template_manager.parse_measure_response(
+            parsed = self.scpi_template_manager.parse_measure_response(
                 response,
                 measure_config.parser,
             )
+            return parsed
         except Exception as exc:
             if self.fallback_simulation or measure_config.fallback_simulation:
                 self.last_warning = f"真实 BLER 查询/解析失败，已使用模拟值：{exc}"
                 return self._simulate_bler()
             raise
+        finally:
+            try:
+                self.execute_template_commands(measure_config.stop, context, "measure_bler.stop")
+            except Exception as exc:
+                self.last_warning = f"BLER 停止命令执行失败：{exc}"
 
     def _build_context(
         self,
