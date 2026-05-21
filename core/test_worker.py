@@ -72,9 +72,33 @@ class TestWorker(QObject):
                     self.log_signal.emit("INFO", "测试已收到停止请求，准备结束")
                     break
 
-                if not self._ensure_cell_ready(item):
-                    failed = True
-                    break
+                cell_key = (item.band, item.channel)
+                if self.last_cell_key != cell_key:
+                    if self.last_cell_key is not None:
+                        self._safe_cell_off()
+                    self.set_state(
+                        TestState.CELL_CONFIGURING,
+                        f"状态切换：CELL_CONFIGURING - 开始配置 LTE 小区 {item.band}/{item.channel}",
+                    )
+                    try:
+                        self._call_lte_prepare_cell(item)
+                        self._emit_instrument_warning()
+                        self.log_signal.emit("INFO", f"开始配置 LTE 小区：{item.band} 信道 {item.channel}")
+
+                        self.set_state(TestState.CELL_ON, "状态切换：CELL_ON - LTE Cell ON")
+                        self._call_lte_cell_on(item)
+                        self._emit_instrument_warning()
+                        self.log_signal.emit("INFO", "LTE Cell ON")
+
+                        self.set_state(TestState.ATTACHED, "状态切换：ATTACHED - 跳过 Attach 检查")
+                        self.log_signal.emit("INFO", "已跳过 UE Attach 检查")
+                        self._run_before_measure()
+                        self.last_cell_key = cell_key
+                    except Exception as exc:
+                        self._emit_instrument_warning()
+                        self.log_signal.emit("ERROR", f"LTE 小区准备异常：{exc}")
+                        failed = True
+                        break
                 after_measure_needed = True
 
                 self.set_state(TestState.MEASURING, "状态切换：MEASURING - 开始测量")
@@ -135,48 +159,8 @@ class TestWorker(QObject):
         else:
             self.log_signal.emit(
                 "WARNING",
-                "未加载 SCPI 模板，RealCMW500 无法确认 UE Attach，测试将失败并执行清理",
+                "未加载 SCPI 模板，RealCMW500 将跳过 UE Attach 检查",
             )
-
-    def _ensure_cell_ready(self, item: TestItem) -> bool:
-        cell_key = (item.band, item.channel)
-        if self.last_cell_key == cell_key:
-            return True
-
-        if self.last_cell_key is not None:
-            self._safe_cell_off()
-
-        self.set_state(
-            TestState.CELL_CONFIGURING,
-            f"状态切换：CELL_CONFIGURING - 开始配置 LTE 小区 {item.band}/{item.channel}",
-        )
-        try:
-            self._call_lte_prepare_cell(item)
-            self._emit_instrument_warning()
-            self.log_signal.emit("INFO", f"开始配置 LTE 小区：{item.band} 信道 {item.channel}")
-
-            self.set_state(TestState.CELL_ON, "状态切换：CELL_ON - LTE Cell ON")
-            self._call_lte_cell_on(item)
-            self._emit_instrument_warning()
-            self.log_signal.emit("INFO", "LTE Cell ON")
-
-            self.set_state(TestState.WAITING_ATTACH, "状态切换：WAITING_ATTACH - 开始等待 UE Attach")
-            self.log_signal.emit("INFO", "开始等待 UE Attach")
-            if not self._call_wait_for_attach():
-                self._emit_instrument_warning()
-                self.log_signal.emit("ERROR", "Attach 失败/超时")
-                return False
-
-            self._emit_instrument_warning()
-            self.set_state(TestState.ATTACHED, "状态切换：ATTACHED - Attach 成功")
-            self.log_signal.emit("INFO", "Attach 成功")
-            self._run_before_measure()
-            self.last_cell_key = cell_key
-            return True
-        except Exception as exc:
-            self._emit_instrument_warning()
-            self.log_signal.emit("ERROR", f"LTE 小区准备异常：{exc}")
-            return False
 
     def _measure_item(self, item: TestItem, current: int, total: int) -> bool:
         try:

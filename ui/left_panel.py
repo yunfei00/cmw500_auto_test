@@ -358,11 +358,9 @@ class LeftPanel(QScrollArea):
 
         self.channel_file_edit = QLineEdit()
         self.serial_file_edit = QLineEdit()
-        self.scpi_template_file_edit = QLineEdit()
 
         self._add_file_row(layout, 0, "信道配置文件", self.channel_file_edit)
         self._add_file_row(layout, 1, "串口配置文件", self.serial_file_edit)
-        self._add_file_row(layout, 2, "CMW500命令配置文件", self.scpi_template_file_edit)
         return group
 
     def _add_file_row(
@@ -562,13 +560,6 @@ class LeftPanel(QScrollArea):
                 "",
                 "串口配置文件 (*.yaml *.yml *.json);;所有文件 (*.*)",
             )
-        elif label_text == "CMW500命令配置文件":
-            path, _ = QFileDialog.getOpenFileName(
-                self,
-                "选择 CMW500 命令配置文件",
-                "",
-                "SCPI 模板文件 (*.yaml *.yml *.json);;所有文件 (*.*)",
-            )
         else:
             path, _ = QFileDialog.getOpenFileName(
                 self,
@@ -585,9 +576,6 @@ class LeftPanel(QScrollArea):
             return
         if label_text == "串口配置文件":
             self._load_serial_config_file(path)
-            return
-        if label_text == "CMW500命令配置文件":
-            self._load_scpi_template_file(path)
             return
         display_path = path.strip() or "未选择文件"
         self._log("INFO", f"已加载 {label_text} 配置文件：{display_path}")
@@ -1094,8 +1082,6 @@ class LeftPanel(QScrollArea):
         if isinstance(instrument, RealCMW500):
             if self.scpi_template_manager and self.scpi_template_manager.has_template():
                 self._log("INFO", "使用 CMW500 SCPI 模板执行 LTE 测试")
-            else:
-                self._log("WARNING", "未加载 CMW500 命令配置文件，RealCMW500 无法确认 UE Attach 状态")
         self._log("INFO", "开始测试")
         self.worker_thread.start()
 
