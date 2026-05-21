@@ -921,6 +921,36 @@ class LeftPanel(QScrollArea):
             if checkbox.isChecked()
         ]
 
+    @staticmethod
+    def _expand_selection_channels(raw_channels: object) -> list[int]:
+        """展开信道列表，兼容逗号分隔字符串输入。"""
+        if raw_channels is None:
+            return []
+
+        if isinstance(raw_channels, str):
+            candidates = [part.strip() for part in raw_channels.replace("，", ",").split(",")]
+        else:
+            try:
+                iterable = list(raw_channels)  # type: ignore[arg-type]
+            except TypeError:
+                iterable = [raw_channels]
+            candidates = []
+            for item in iterable:
+                if isinstance(item, str):
+                    candidates.extend(
+                        part.strip()
+                        for part in item.replace("，", ",").split(",")
+                    )
+                else:
+                    candidates.append(str(item).strip())
+
+        channels: list[int] = []
+        for item in candidates:
+            if not item:
+                continue
+            channels.append(int(float(item)))
+        return channels
+
     def collect_lte_config(self) -> LteTestConfig:
         selected_bands = [
             f"B{band}" for band, checkbox in self.band_checkboxes.items() if checkbox.isChecked()
@@ -935,7 +965,7 @@ class LeftPanel(QScrollArea):
                 except (KeyError, ValueError):
                     continue
                 for test_item_name, selection in selections:
-                    for channel in selection.channels:
+                    for channel in self._expand_selection_channels(selection.channels):
                         data.append(
                             {
                                 "band": band,
