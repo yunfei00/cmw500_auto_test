@@ -125,7 +125,7 @@ lte:
     - "CONFigure:LTE:SIGN:BAND {band_number}"
     - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
   cell_on:
-    - "CALL:LTE:SIGN:PSWitched:STATe ON"
+    - "SOURce:LTE:SIGN:CELL:STATe ON"
   wait_attach:
     query: "FETCh:LTE:SIGN:PSWitched:STATe?"
     parser: "contains"
@@ -144,7 +144,7 @@ lte:
   after_measure:
     - "SYST:ERR?"
   cell_off:
-    - "CALL:LTE:SIGN:PSWitched:STATe OFF"
+    - "SOURce:LTE:SIGN:CELL:STATe OFF"
   cleanup:
     - "SYST:ERR?"
 ```

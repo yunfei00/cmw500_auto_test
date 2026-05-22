@@ -11,7 +11,7 @@ lte:
     - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
 
   cell_on:
-    - "CALL:LTE:SIGN:PSWitched:STATe ON"
+    - "SOURce:LTE:SIGN:CELL:STATe ON"
 
   wait_attach:
     query: "SENSe:LTE:SIGN:RRCState?"
@@ -38,7 +38,7 @@ lte:
     fallback_simulation: true
 
   cell_off:
-    - "CALL:LTE:SIGN:PSWitched:STATe OFF"
+    - "SOURce:LTE:SIGN:CELL:STATe OFF"
 
   cleanup:
     - "SYST:ERR?"
