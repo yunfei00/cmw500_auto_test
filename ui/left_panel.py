@@ -359,9 +359,11 @@ class LeftPanel(QScrollArea):
 
         self.channel_file_edit = QLineEdit()
         self.serial_file_edit = QLineEdit()
+        self.scpi_template_file_edit = QLineEdit()
 
         self._add_file_row(layout, 0, "信道配置文件", self.channel_file_edit)
         self._add_file_row(layout, 1, "串口配置文件", self.serial_file_edit)
+        self._add_file_row(layout, 2, "CMW500命令模板", self.scpi_template_file_edit)
         return group
 
     def _add_file_row(
@@ -561,6 +563,13 @@ class LeftPanel(QScrollArea):
                 "",
                 "串口配置文件 (*.yaml *.yml *.json);;所有文件 (*.*)",
             )
+        elif label_text == "CMW500命令模板":
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择 CMW500 命令模板",
+                "",
+                "模板文件 (*.yaml *.yml *.json);;所有文件 (*.*)",
+            )
         else:
             path, _ = QFileDialog.getOpenFileName(
                 self,
@@ -577,6 +586,9 @@ class LeftPanel(QScrollArea):
             return
         if label_text == "串口配置文件":
             self._load_serial_config_file(path)
+            return
+        if label_text == "CMW500命令模板":
+            self._load_scpi_template_file(path)
             return
         display_path = path.strip() or "未选择文件"
         self._log("INFO", f"已加载 {label_text} 配置文件：{display_path}")
