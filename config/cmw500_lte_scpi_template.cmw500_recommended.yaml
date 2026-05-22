@@ -1,0 +1,49 @@
+instrument:
+  name: CMW500
+  transport: socket
+  default_port: 5025
+
+lte:
+  setup:
+    - "INST LTE"
+    - "CONFigure:LTE:SIGN:PCC:BAND OB{band_number}"
+    - "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:DL 20"
+    - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
+    # LTE 通用设置记录（CMW500）
+    - "CONFigure:LTE:SIGN:RFSettings:FREQuency:DL?"
+    - "CONFigure:LTE:SIGN:EBLer:REPetition?"
+    - "CONFigure:LTE:SIGN:EBLer:REPetition SING"
+    - "CONFigure:LTE:SIGN:EBLer:SFRames 1000"
+
+  cell_on:
+    - "SOURce:LTE:SIGN:CELL:STATe ON"
+
+  wait_attach:
+    query: "SENSe:LTE:SIGN:RRCState?"
+    parser: "contains"
+    expected: "CONN"
+    interval_sec: 0.2
+    timeout_sec: 30.0
+    fallback_success: false
+
+  set_rx_level:
+    - "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
+
+  measure_bler:
+    start:
+      - "INITiate:LTE:SIGN:EBLer"
+    state_query: "FETCh:LTE:SIGN:EBLer:STATe?"
+    state_done: "RDY"
+    state_interval_sec: 0.05
+    state_timeout_sec: 8.0
+    stop:
+      - "STOP:LTE:SIGN:EBLer"
+    query: "FETCh:LTE:SIGN:EBLer:RELative?"
+    parser: "csv_index:3"
+    fallback_simulation: true
+
+  cell_off:
+    - "SOURce:LTE:SIGN:CELL:STATe OFF"
+
+  cleanup:
+    - "SYST:ERR?"
