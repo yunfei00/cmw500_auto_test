@@ -210,6 +210,39 @@ def test_missing_headers_raises(tmp_path: Path) -> None:
         manager.load()
 
 
+@pytest.mark.parametrize("invalid_loss", ["nan", "inf", -0.1])
+def test_invalid_or_negative_loss_is_rejected(tmp_path: Path, invalid_loss: object) -> None:
+    from openpyxl import Workbook
+
+    config_path = tmp_path / "invalid_loss.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "LTE"
+    sheet.append(
+        [
+            "band",
+            "固定信道",
+            "begin",
+            "end",
+            "step",
+            "线损",
+            "bw",
+            "转盘bw",
+            "转盘",
+            "top bw",
+            "top",
+            "三信道bw",
+            "三信道",
+        ]
+    )
+    sheet.append(["B3", "是", "", "", "", invalid_loss, 20, 20, 1575, 20, 1300, 20, "1200,1575,1949"])
+    workbook.save(config_path)
+
+    manager = LTEChannelConfigManager(config_path)
+    with pytest.raises(LTEChannelConfigError, match="未解析到任何有效"):
+        manager.load()
+
+
 def test_generate_lte_test_plan_from_excel(tmp_path: Path) -> None:
     config_path = tmp_path / "lte_channel_config.xlsx"
     write_default_lte_channel_excel(config_path)

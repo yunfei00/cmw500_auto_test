@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QTime
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+from datetime import datetime
+
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+
+from core.paths import ensure_user_data_dir
 
 
 class RightPanel(QWidget):
@@ -23,14 +26,24 @@ class RightPanel(QWidget):
 
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
+        self.log_edit.document().setMaximumBlockCount(5000)
+        self.log_file = ensure_user_data_dir() / "logs" / f"cmw500_{datetime.now():%Y%m%d}.log"
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
         layout.addLayout(button_layout)
         layout.addWidget(self.log_edit, 1)
 
     def append_log(self, level: str, message: str) -> None:
-        timestamp = QTime.currentTime().toString("HH:mm:ss")
-        self.log_edit.appendPlainText(f"[{timestamp}][{level}] {message}")
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        line = f"[{timestamp}][{level}] {message}"
+        self.log_edit.appendPlainText(line)
         self.log_edit.verticalScrollBar().setValue(self.log_edit.verticalScrollBar().maximum())
+        try:
+            with self.log_file.open("a", encoding="utf-8") as file:
+                file.write(f"{line}\n")
+        except OSError:
+            # The UI log remains available even if persistent logging is unavailable.
+            pass
 
     def clear_log(self) -> None:
         self.log_edit.clear()
@@ -40,6 +53,10 @@ class RightPanel(QWidget):
         if not path:
             return
 
-        with open(path, "w", encoding="utf-8") as file:
-            file.write(self.log_edit.toPlainText())
+        try:
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(self.log_edit.toPlainText())
+        except OSError as exc:
+            QMessageBox.critical(self, "日志保存失败", str(exc))
+            return
         self.append_log("INFO", f"日志已保存：{path}")

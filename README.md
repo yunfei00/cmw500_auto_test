@@ -1,278 +1,141 @@
-# cmw500_auto_test
+# CMW500 Auto Test
 
-CMW500 手机灵敏度自动化测试工具 UI 原型。
+面向 Rohde & Schwarz CMW500 的 LTE 手机灵敏度自动化测试桌面工具。当前版本为 `0.2.0-dev`，已完成 P0 软件闭环，定位为商业发布候选版；在完成目标仪表实机校准、端到端验收和代码签名前，不应作为正式量产发布。
 
-## 功能说明
+## 已实现能力
 
-- 三栏桌面界面：左侧操作与配置区，中间实时测试数据表格区，右侧实时日志区。
-- LTE 配置界面包含仪表参数、测试信道选择、Band1 到 Band66 多选配置。
-- WiFi、WCDMA、GSM 已搭建基础占位配置结构。
-- 支持配置文件加载、手机设置、测试场景选择、测试控制、常用 ADB 操作等 UI 入口。
-- 支持 LTE 假仪表自动测试流程：生成测试计划、后台线程执行、实时写入表格/摘要/日志。
-- 支持测试暂停、继续、停止，测试结束后自动恢复按钮状态。
-- 支持 LTE 测试结果汇总、灵敏度点计算，以及 RawResults/Summary 双 Sheet Excel 导出。
-- 支持加载 LTE 信道配置 Excel，并优先使用 Excel 中的 Band/频点/信道映射生成测试计划。
-- 支持基础 ADB 手机控制：刷新设备、安装 App、重启、停止/启动 App、清除数据、截图。
-- 支持加载串口配置文件，格式为 YAML 或 JSON。
-- 支持仪表模式切换：Fake CMW500 与 Real CMW500 TCP Socket/SCPI 连接。
-- 支持 CMW500 LTE SCPI 命令模板配置，让 RealCMW500 从 YAML/JSON 模板执行 LTE setup、RX Level 设置和 BLER 查询。
-- 支持 LTE 测试流程状态机：小区配置、Cell ON、等待 UE Attach、测量、Cell OFF、Cleanup。
+- LTE 灵敏度粗扫、首个确认失败点后的细扫，以及失败/异常重试。
+- 全局线损与信道配置线损叠加，分别记录 DUT 目标电平和仪表下发电平。
+- Fake CMW500 模拟流程；所有模拟结果均带 `SIMULATION` 标识和红色水印。
+- Real CMW500 支持 VISA 与 SCPI Socket，连接时强制校验 R&S CMW 身份。
+- 真实模式严格 fail-closed：通信、超时、解析和 BLER 越界错误不会回退为模拟值。
+- 类型化 SCPI 步骤：`write`、`query`、`query_and_assert`；查询响应会被消费并写入结构化 trace。
+- LTE 小区配置、Cell ON、Attach、BLER、Cell OFF、Cleanup 状态机。
+- 暂停、继续、协作取消、I/O 中断、断线后安全重连清理；清理未确认时锁存 `FAILED_UNSAFE`，在操作员明确确认人工 RF/Cell OFF 前禁止新测试和退出。
+- 每次测试使用独立 Run ID，并记录仪表 IDN、连接参数、配置快照、配置哈希、软件版本、构建 commit、校准信息和命令 trace。
+- 自动保存 Excel 报告，包含 `RawResults`、`Summary`、`RunMetadata`、`SCPITrace` 四个工作表。
+- `STOPPED`、`FAILED`、`FAILED_UNSAFE` 报告带不完整/不安全水印，不能被误认为正式 PASS。
+- 基础 ADB 能力：设备刷新、APK 安装、重启、App 启停、清数据和截图；耗时操作在后台执行。
+- 用户配置、日志、截图和自动报告保存在 `%LOCALAPPDATA%\cmw500_auto_test`，不会写入程序安装目录。
 
-## 运行方式
+当前只开放 LTE。WiFi、WCDMA、GSM 页签已禁用，尚未形成测试闭环。
 
-```bash
-pip install PySide6 openpyxl PyYAML
+## 开发环境运行
+
+要求 Python 3.11+：
+
+```powershell
+python -m pip install --requirement requirements.txt
 python main.py
 ```
 
-## 依赖安装
+VISA 连接优先使用系统已安装的 NI/Keysight/R&S VISA；系统后端不可用时会回退到随依赖安装的 `pyvisa-py`。Socket 模式默认使用 TCP 5025。
 
-- Python 3.11+
-- PySide6
-- openpyxl
-- PyYAML
-- Android Platform Tools（用于 adb 操作）
+ADB 功能需要安装 Android Platform Tools，并确保 `adb` 在 `PATH` 中：
 
-安装命令：
-
-```bash
-pip install PySide6 openpyxl PyYAML
-```
-
-ADB 检查：
-
-```bash
+```powershell
 adb devices
 ```
 
-如果命令不可用，请安装 Android Platform Tools，并将其目录加入 PATH。
+## 正式测试操作要求
 
-## 当前版本说明
+1. 选择 `Real CMW500`，填写实际 VISA Resource 或 Socket 地址并连接。
+2. 确认 `*IDN?` 被识别为受支持的 R&S CMW。
+3. 加载并审核目标仪表适用的 LTE SCPI 模板。
+4. 加载 LTE 信道/线损配置，确认 Band、带宽、信道和线损来源。
+5. 填写测试人员、DUT 标识、仪表校准标识及有效期；过期校准会阻止启动。
+6. 核对扫描起止电平、粗细步长、包数、BLER 门限、稳定时间和重试次数。
+7. 完成测试后检查终态。只有 `COMPLETED` 且数据来源为 `REAL` 的报告才具备进入正式评审的前提。
 
-当前版本为 Phase 8，在原有 UI 原型、FakeCMW500 测试闭环、信道配置、结果导出、手机控制和 CMW500 Socket/SCPI 通信层基础上增加了 LTE 测试流程状态机：
-
-- `MainWindow(QMainWindow)` 作为主窗口。
-- `LeftPanel`、`CenterPanel`、`RightPanel` 通过 `QSplitter(Qt.Horizontal)` 组成三栏布局。
-- `RightPanel.append_log(level, message)` 统一接收日志。
-- `core/test_plan.py` 根据当前 LTE UI 配置生成测试计划。
-- `core/test_worker.py` 使用 `QThread + QObject` 后台执行测试，所有 UI 更新通过 Qt Signal 回主线程。
-- `core/fake_cmw500.py` 根据接收电平模拟 BLER，`core/result_judge.py` 根据 BLER 门限判定 PASS/FAIL。
-- `core/result_summary.py` 按制式、Band、信道、频点类型、测试模式分组计算灵敏度点。
-- `reports/excel_exporter.py` 使用 openpyxl 导出 RawResults 和 Summary 两个 Sheet。
-- `core/channel_config.py` 解析信道配置 Excel，`scripts/create_sample_channel_config.py` 可生成示例配置文件。
-- `devices/adb_client.py` 封装 adb 命令调用，所有操作带超时和异常处理。
-- `core/serial_config.py` 解析 YAML/JSON 串口配置文件。
-- `devices/scpi_socket_client.py` 使用 Python 标准库 socket 实现 SCPI TCP 客户端，默认端口 `5025`。
-- `devices/cmw500_controller.py` 提供 `RealCMW500` 控制器，支持 TCP 连接、断开、`*IDN?` 查询、`*RST` 和 `SYST:PRES` 基础命令。
-- `core/fake_cmw500.py` 保持默认可用回退模式，并兼容统一仪表接口。
-- `core/scpi_template.py` 解析 CMW500 LTE SCPI 命令模板，并支持模板变量渲染和测量返回值解析。
-- `core/test_states.py` 定义 LTE 测试流程状态，`core/test_worker.py` 按状态机推进测试。
-
-## 仪表连接说明
-
-默认仪表模式为 `Fake`。点击“连接仪表”后会创建并连接 Fake CMW500，点击“查询IDN”返回：
+随仓库提供的推荐模板位于：
 
 ```text
-Fake CMW500 Simulator
+config/cmw500_lte_scpi_template.cmw500_recommended.yaml
 ```
 
-`Real CMW500` 模式用于连接真实 CMW500 的 SCPI Socket 服务：
+模板是可审计的基线，不代表已适配所有 CMW500 软件版本、选件和 LTE 应用模式。正式使用前必须依据目标仪表手册与实机返回值校准，并保存验证证据。
 
-- 默认 IP：`192.168.1.100`
-- 默认端口：`5025`
-- 默认超时：`5.0 s`
+## SCPI 模板格式
 
-当前 Real CMW500 已支持：
-
-- TCP Socket 连接/断开
-- `*IDN?` 查询
-- `*RST` reset 基础命令
-- `SYST:PRES` preset 基础命令
-
-当前 Real CMW500 仍需按实际仪表继续校准：
-
-- LTE 小区真实配置 SCPI
-- RX Level 真实设置 SCPI
-- BLER 真实读取 SCPI
-
-加载 CMW500 命令模板后，Real 模式会按模板执行 LTE setup、Cell ON、等待 UE Attach、RX Level 设置、BLER 查询、Cell OFF 和 Cleanup；未加载 `wait_attach` 时不会假装 Attach 成功。Fake 模式会自动 Attach 成功，作为默认可用回退。
-
-## SCPI 命令模板
-
-Phase 8 实现的是 CMW500 LTE SCPI 命令模板和流程状态机执行框架。基础示例模板位于：
-
-```text
-config/cmw500_lte_scpi_template.example.yaml
-```
-
-Phase 8 流程示例模板位于：
-
-```text
-config/cmw500_lte_scpi_template.phase8.example.yaml
-```
-
-示例内容：
+命令步骤支持：
 
 ```yaml
-instrument:
-  name: CMW500
-  transport: socket
-  default_port: 5025
-
-lte:
-  setup:
-    - "INST LTE"
-    - "CONFigure:LTE:SIGN:BAND {band_number}"
-    - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
-  cell_on:
-    - "SOURce:LTE:SIGN:CELL:STATe ON"
-  wait_attach:
-    query: "FETCh:LTE:SIGN:PSWitched:STATe?"
-    parser: "contains"
-    expected: "ATT"
-    interval_sec: 1.0
-    timeout_sec: 30.0
-    fallback_success: false
-  before_measure:
-    - "SYST:ERR?"
-  set_rx_level:
-    - "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
-  measure_bler:
-    query: "FETCh:LTE:SIGN:BLER?"
-    parser: "first_float"
-    fallback_simulation: true
-  after_measure:
-    - "SYST:ERR?"
-  cell_off:
-    - "SOURce:LTE:SIGN:CELL:STATe OFF"
-  cleanup:
-    - "SYST:ERR?"
+- type: write
+  command: "INST LTE"
+- type: query
+  command: "CONFigure:LTE:SIGN:RFSettings:FREQuency:DL?"
+- type: query_and_assert
+  command: "SYST:ERR?"
+  parser: regex
+  expected: '^\s*0(?:,|$)'
 ```
 
-支持变量：
+支持的上下文变量包括：
 
-- `{mode}`
-- `{band}`
-- `{band_number}`
-- `{channel}`
-- `{channel_type}`
-- `{rx_level}`
-- `{packet_count}`
-- `{test_mode}`
+- `{mode}`、`{band}`、`{band_number}`、`{channel}`、`{channel_type}`
+- `{test_mode}`、`{rx_level}`、`{packet_count}`
+- `{bw}`、`{bandwidth}`、`{cable_loss}`
 
-测量结果 parser：
+BLER parser 支持 `first_float`、`second_float`、`csv_index:N`。Attach/状态 parser 支持 `equals`、`equals_ci`、`contains`、`regex`、`first_float_ge:X`、`first_float_le:X`。
 
-- `first_float`：提取返回字符串中的第一个浮点数
-- `second_float`：提取返回字符串中的第二个浮点数
-- `csv_index:N`：按逗号分隔后取第 N 个字段，N 从 0 开始
+真实测试启动前会校验安全关键段、变量、parser、超时和 fallback 标志。`fallback_simulation=true` 与 `fallback_success=true` 在正式预检中会被拒绝。
 
-`wait_attach` parser：
+## 配置与报告
 
-- `contains`：返回字符串包含 `expected` 即成功
-- `equals`：返回字符串去除首尾空白后等于 `expected` 即成功
-- `first_float_ge:X`：返回字符串中的第一个浮点数大于等于 X 即成功
-- `first_float_le:X`：返回字符串中的第一个浮点数小于等于 X 即成功
-- `regex`：把 `expected` 当作正则表达式，匹配成功即成功
-
-LTE 状态机状态：
-
-- `IDLE`
-- `PREPARING`
-- `CELL_CONFIGURING`
-- `CELL_ON`
-- `WAITING_ATTACH`
-- `ATTACHED`
-- `MEASURING`
-- `PAUSED`
-- `STOPPING`
-- `CLEANUP`
-- `COMPLETED`
-- `FAILED`
-
-流程顺序：
+内置 LTE 信道基线位于 `configs/lte_channel_config.xlsx`。首次运行会复制到：
 
 ```text
-PREPARING -> CELL_CONFIGURING -> CELL_ON -> WAITING_ATTACH -> ATTACHED -> MEASURING -> CLEANUP -> COMPLETED
+%LOCALAPPDATA%\cmw500_auto_test\configs\lte_channel_config.xlsx
 ```
 
-测试计划按 Band/Channel 重建小区，同一个 Band/Channel 下只扫不同 RX Level；切换 Band/Channel 时重新执行 setup、cell_on 和 wait_attach。`fallback_simulation` 为 `true` 时，如果真实 BLER 查询或解析失败，RealCMW500 会回退模拟 BLER，并在日志中输出 WARNING。示例命令只用于说明模板格式，不保证适配所有 CMW500；真实 LTE attach、信令建立、数据业务、PTM/DAU 或 BLER 读取流程需要根据仪表选件、应用模式和官方手册继续补充。用户可以直接修改 YAML/JSON 模板，而不是修改 Python 代码。
-
-生成示例信道配置：
-
-```bash
-python scripts/create_sample_channel_config.py
-```
-
-串口配置 YAML 示例：
-
-```yaml
-serial_ports:
-  - name: phone_debug
-    port: COM5
-    baudrate: 115200
-    role: phone
-  - name: relay_board
-    port: COM8
-    baudrate: 9600
-    role: relay
-```
-
-串口配置 JSON 示例：
-
-```json
-{
-  "serial_ports": [
-    {
-      "name": "phone_debug",
-      "port": "COM5",
-      "baudrate": 115200,
-      "role": "phone"
-    }
-  ]
-}
-```
-
-## 后续计划
-
-- 完善真实 CMW500 LTE 测试控制流程。
-- 增加 pyvisa、串口通信等实际控制模块。
-- 补充 CMW500 LTE 小区配置、RX Level 设置和 BLER 读取 SCPI 命令。
-- 实现配置文件参数校验。
-- 增加真实测试流程、异常恢复、结果导出与报告生成。
-- 引入数据持久化和更完整的测试记录管理。
-
-## 本阶段不包含
-
-- 真实 CMW500 LTE 小区配置和 BLER 测量
-- 真实 pyvisa
-- 真实串口通信
-- 真实测试流程和真实仪表测量
-- 数据库存储
-
-## 自动构建与发布
-
-push 到 `main` 后，GitHub Actions 会自动执行基础检查并构建 Windows 绿色版压缩包。
-
-推送 `v*` 格式的 tag 后，会自动创建 GitHub Release，并上传对应的 Windows x64 绿色版构建产物。
-
-打 tag 示例：
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-构建产物名称示例：
+每次运行结束后会自动写入：
 
 ```text
-CMW500AutoTest-v0.1.0-windows-x64.zip
+%LOCALAPPDATA%\cmw500_auto_test\runs\<run_id>.xlsx
 ```
 
-本地构建命令：
+报告保留所有重试原始记录，并对外部字符串做 Excel 公式转义。模拟、停止、失败和安全清理未确认的报告均有醒目水印。
 
-```bash
-pip install -r requirements.txt
-pip install -r requirements-build.txt
+## 测试
+
+```powershell
+python -m pytest -q --basetemp=.pytest-tmp
+```
+
+测试覆盖扫描/重试/线损、状态终态、安全停止、SCPI 模板与控制器、Socket/VISA 异常、汇总、Excel 报告以及构建/归档校验。
+
+## Windows 构建与发布
+
+```powershell
+python -m pip install --requirement requirements.txt
+python -m pip install --requirement requirements-build.txt
 python scripts/build_windows.py
 python scripts/package_release.py --version dev
 ```
+
+构建会检查关键资源、运行时版本、构建 commit、PyVISA 后端、归档内容和 SHA-256 清单。开发构建允许未签名，但会明确告警；正式版本构建和归档都会独立拒绝未通过 Authenticode 验证的 EXE。
+
+正式 tag 必须使用严格的 `vX.Y.Z`：
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions 对 tag 构建强制 Authenticode 签名并验证。需要配置：
+
+- `CMW_SIGNTOOL_PATH`：`signtool.exe` 路径或命令名。
+- `CMW_SIGN_CERT_SHA1`：证书存储中的签名证书 SHA1（GitHub Secret）。
+- `CMW_SIGN_TIMESTAMP_URL`：RFC 3161 时间戳服务地址。
+
+缺少签名配置时，tag 发布会 fail-closed，不会创建 GitHub Release。
+
+## 商业发布前仍需完成的外部门禁
+
+- 在目标 CMW500 型号、软件版本、选件和 LTE 应用模式上完成 SCPI 校准。
+- 使用真实 DUT 完成代表性 Band/信道/电平的端到端验收并归档报告、日志和 trace。
+- 确认仪表校准证书有效，核对线损文件来源和复测周期。
+- 配置并验证组织代码签名证书、时间戳服务和发布权限。
+- 完成第三方依赖许可证、隐私说明、用户手册及支持流程的法务/运营评审。
+
+详细进度与下一步见 `PROJECT_STATUS.md`。

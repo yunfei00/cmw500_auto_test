@@ -1,3 +1,6 @@
-PySide6
-openpyxl
-PyYAML
+PySide6==6.11.1
+openpyxl==3.1.5
+PyYAML==6.0.3
+PyVISA==1.16.2
+PyVISA-py==0.8.1
+psutil==7.2.2

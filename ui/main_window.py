@@ -1,6 +1,8 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QSplitter
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter
 
+from app_info import APP_VERSION
 from ui.center_panel import CenterPanel
 from ui.left_panel import LeftPanel
 from ui.right_panel import RightPanel
@@ -9,7 +11,7 @@ from ui.right_panel import RightPanel
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("CMW500 手机灵敏度自动化测试工具")
+        self.setWindowTitle(f"CMW500 手机灵敏度自动化测试工具 {APP_VERSION}")
         self.resize(1500, 900)
 
         self.left_panel = LeftPanel()
@@ -20,7 +22,8 @@ class MainWindow(QMainWindow):
         self.center_panel.set_logger(self.right_panel.append_log)
         self.left_panel.set_add_row_callback(self.center_panel.add_test_row)
         self.left_panel.set_update_summary_callback(self.center_panel.update_summary)
-        self.left_panel.set_finished_callback(self.center_panel.generate_summary_from_current_results)
+        self.left_panel.set_run_started_callback(self.center_panel.begin_run)
+        self.left_panel.set_finished_callback(self.center_panel.finish_run)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.left_panel)
@@ -33,7 +36,45 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(splitter)
         self.setStyleSheet(self._style_sheet())
-        self.right_panel.append_log("INFO", "UI 原型已启动")
+        self.right_panel.append_log("INFO", f"{self.windowTitle()} 已启动")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.left_panel.is_test_running():
+            answer = QMessageBox.question(
+                self,
+                "测试仍在运行",
+                "关闭程序前将停止测试并执行 Cell OFF/Cleanup。是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+        if self.left_panel.shutdown():
+            event.accept()
+            return
+
+        if self.left_panel.requires_unsafe_exit_acknowledgement():
+            answer = QMessageBox.question(
+                self,
+                "安全清理未确认",
+                "自动 Cell OFF/Cleanup 失败。只有在您已人工确认仪表 RF/Cell OFF 后，"
+                "才能强制退出。是否确认已完成人工安全处置并退出？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self.left_panel.acknowledge_unsafe_exit()
+                if self.left_panel.shutdown():
+                    event.accept()
+                    return
+
+        QMessageBox.critical(
+            self,
+            "无法安全退出",
+            "仪表操作尚未结束或安全清理失败，程序将保持运行。请确认 RF 状态后重试。",
+        )
+        event.ignore()
 
     def _style_sheet(self) -> str:
         return """

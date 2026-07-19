@@ -18,25 +18,74 @@ class SummaryResult:
     total_count: int
     result: str
     remark: str
+    run_id: str = ""
+    data_source: str = "UNKNOWN"
+    bw: float | None = None
+    sensitivity_upper: float | None = None
+    error_count: int = 0
 
 
 def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
-    grouped_results: dict[tuple[str, str, int, str, str], list[TestResult]] = {}
+    grouped_results: dict[
+        tuple[str, str, str, str, int, str, str, float | None], list[TestResult]
+    ] = {}
     for result in results:
-        key = (result.mode, result.band, result.channel, result.channel_type, result.test_mode)
+        key = (
+            result.run_id,
+            result.data_source,
+            result.mode,
+            result.band,
+            result.channel,
+            result.channel_type,
+            result.test_mode,
+            result.bw,
+        )
         grouped_results.setdefault(key, []).append(result)
 
     summary_results: list[SummaryResult] = []
-    for (mode, band, channel, channel_type, test_mode), group in grouped_results.items():
+    for (
+        run_id,
+        data_source,
+        mode,
+        band,
+        channel,
+        channel_type,
+        test_mode,
+        bw,
+    ), group in grouped_results.items():
         pass_items = [item for item in group if item.result.upper() == "PASS"]
         fail_items = [item for item in group if item.result.upper() == "FAIL"]
-        sensitivity = min((item.rx_level for item in pass_items), default=None)
-        summary_result = "PASS" if sensitivity is not None else "FAIL"
-        remark = (
-            f"Sensitivity = {sensitivity:g} dBm"
-            if sensitivity is not None
-            else "No PASS point found"
+        error_items = [item for item in group if item.result.upper() == "ERROR"]
+        terminal_items = _terminal_attempts(group)
+        terminal_errors = [item for item in terminal_items if item.result.upper() == "ERROR"]
+        terminal_passes = [item for item in terminal_items if item.result.upper() == "PASS"]
+        sensitivity = min((item.rx_level for item in terminal_passes), default=None)
+        sensitivity_upper = next(
+            (item.sensitivity_upper for item in group if item.sensitivity_upper is not None),
+            None,
         )
+
+        if terminal_errors:
+            summary_result = "ERROR"
+            remark = "Measurement incomplete because the final retry ended with an error"
+        elif sensitivity is None:
+            summary_result = "FAIL"
+            remark = "No PASS point found"
+        elif sensitivity_upper is None:
+            summary_result = "PASS"
+            remark = f"Sensitivity = {sensitivity:g} dBm (no specification limit)"
+        elif sensitivity <= sensitivity_upper:
+            summary_result = "PASS"
+            remark = (
+                f"Sensitivity = {sensitivity:g} dBm, meets upper limit "
+                f"{sensitivity_upper:g} dBm"
+            )
+        else:
+            summary_result = "FAIL"
+            remark = (
+                f"Sensitivity = {sensitivity:g} dBm, exceeds upper limit "
+                f"{sensitivity_upper:g} dBm"
+            )
 
         summary_results.append(
             SummaryResult(
@@ -51,7 +100,22 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
                 total_count=len(group),
                 result=summary_result,
                 remark=remark,
+                run_id=run_id,
+                data_source=data_source,
+                bw=bw,
+                sensitivity_upper=sensitivity_upper,
+                error_count=len(error_items),
             )
         )
 
     return summary_results
+
+
+def _terminal_attempts(group: list[TestResult]) -> list[TestResult]:
+    latest: dict[tuple[str, float], TestResult] = {}
+    for item in group:
+        key = (item.scan_phase, item.rx_level)
+        previous = latest.get(key)
+        if previous is None or item.attempt >= previous.attempt:
+            latest[key] = item
+    return list(latest.values())

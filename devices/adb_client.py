@@ -61,8 +61,11 @@ class AdbClient:
             return False, self.last_error
 
         output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-        file_path = output_path / f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        try:
+            output_path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return False, f"截图目录创建失败：{exc}"
+        file_path = output_path / f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
 
         try:
             completed = subprocess.run(
@@ -82,7 +85,12 @@ class AdbClient:
             error = completed.stderr.decode("utf-8", errors="replace").strip()
             return False, error or "截图失败"
 
-        file_path.write_bytes(completed.stdout)
+        if not completed.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+            return False, "ADB 返回的截图不是有效 PNG 数据"
+        try:
+            file_path.write_bytes(completed.stdout)
+        except OSError as exc:
+            return False, f"截图保存失败：{exc}"
         return True, str(file_path)
 
     def get_current_foreground_app(self, device_id: str) -> tuple[bool, str]:

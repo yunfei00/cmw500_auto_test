@@ -23,6 +23,7 @@ def generate_lte_test_plan(
                 continue
 
             channel = int(channel_raw)
+            loss_db = _row_loss_db(row, band, lte_channel_manager)
             items.append(
                 TestItem(
                     index=index,
@@ -33,6 +34,7 @@ def generate_lte_test_plan(
                     test_mode=config.test_mode,
                     rx_level=config.start_level,
                     bw=_parse_optional_float(row.get("bw")),
+                    loss_db=loss_db,
                 )
             )
             index += 1
@@ -53,6 +55,7 @@ def generate_lte_test_plan(
                         test_mode=config.test_mode,
                         rx_level=config.start_level,
                         bw=selection.bw,
+                        loss_db=selection.loss_db,
                     )
                 )
                 index += 1
@@ -70,3 +73,20 @@ def _parse_optional_float(value: object) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _row_loss_db(
+    row: dict[str, str | int | float],
+    band: str,
+    manager: LTEChannelConfigManager | None,
+) -> float:
+    for key in ("loss_db", "loss", "线损"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return float(value)
+    if manager is not None and manager.has_config():
+        try:
+            return float(manager.get_band_config(band).loss_db)
+        except KeyError:
+            pass
+    return 0.0

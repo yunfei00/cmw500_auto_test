@@ -2,56 +2,188 @@ name: Windows Build and Release
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
     tags:
       - "v*"
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
-  build:
+  test:
+    name: Test
     runs-on: windows-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
 
       - name: Install dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-build.txt
+          python -m pip install --requirement requirements.txt
+          python -m pip install --requirement requirements-build.txt
 
       - name: Run tests
-        run: python -m pytest -q
+        shell: pwsh
+        run: python -m pytest -q --basetemp=.pytest-tmp-ci
+
+  build:
+    name: Build Windows package
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --requirement requirements.txt
+          python -m pip install --requirement requirements-build.txt
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw "Release tag must use strict vX.Y.Z format without leading zeros: $env:GITHUB_REF_NAME"
+          }
 
       - name: Build Windows package directory
-        run: python scripts/build_windows.py
+        shell: pwsh
+        env:
+          CMW_SIGNTOOL_PATH: ${{ vars.CMW_SIGNTOOL_PATH }}
+          CMW_SIGN_CERT_SHA1: ${{ secrets.CMW_SIGN_CERT_SHA1 }}
+          CMW_SIGN_TIMESTAMP_URL: ${{ vars.CMW_SIGN_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
+          CMW_REQUIRE_SIGNING: ${{ vars.CMW_REQUIRE_SIGNING || '0' }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:CMW_REQUIRE_SIGNING = '1'
+          }
+          python scripts/build_windows.py
 
-      - name: Package release archive
-        run: python scripts/package_release.py --version "${{ github.ref_name }}"
+      - name: Verify critical runtime resources
+        shell: pwsh
+        run: python -c "from scripts.build_windows import verify_bundled_modules, verify_runtime_resources; verify_runtime_resources(); verify_bundled_modules()"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Smoke test packaged executable
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $process = Start-Process -FilePath "dist/CMW500AutoTest/CMW500AutoTest.exe" `
+            -ArgumentList "--smoke-test" -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged executable smoke test failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Package release archive and checksum
+        shell: pwsh
+        run: python scripts/package_release.py
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: CMW500AutoTest-windows-x64
-          path: release/*.zip
+          path: |
+            release/*.zip
+            release/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  release:
+    name: Publish GitHub release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Validate release tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw "Release tag must use strict vX.Y.Z format without leading zeros: $env:GITHUB_REF_NAME"
+          }
+
+      - name: Download tested build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: CMW500 Auto Test ${{ github.ref_name }}
-          body: |
-            - Windows x64 portable package
-            - unzip and run CMW500AutoTest.exe
-          files: release/*.zip
+          name: CMW500AutoTest-windows-x64
+          path: release-assets
+
+      - name: Verify SHA-256 manifest
+        shell: pwsh
+        run: |
+          $manifests = @(Get-ChildItem release-assets -Recurse -File -Filter *.zip.sha256)
+          if ($manifests.Count -ne 1) {
+            throw "Expected exactly one SHA-256 manifest, found $($manifests.Count)."
+          }
+
+          $manifestLine = (Get-Content -Raw $manifests[0].FullName).Trim()
+          if ($manifestLine -notmatch '^([a-f0-9]{64})  ([^\\/]+\.zip)$') {
+            throw "Invalid SHA-256 manifest format."
+          }
+          $expectedHash = $Matches[1]
+          $zipName = $Matches[2]
+          $zipPath = Join-Path $manifests[0].DirectoryName $zipName
+          if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
+            throw "Archive referenced by manifest was not found: $zipName"
+          }
+
+          $actualHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "SHA-256 verification failed for $zipName."
+          }
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = @(Get-ChildItem release-assets -Recurse -File -Filter *.zip)
+          $manifest = @(Get-ChildItem release-assets -Recurse -File -Filter *.zip.sha256)
+          if ($zip.Count -ne 1 -or $manifest.Count -ne 1) {
+            throw "Expected exactly one archive and one checksum manifest."
+          }
+          gh release create $env:GITHUB_REF_NAME $zip[0].FullName $manifest[0].FullName `
+            --verify-tag `
+            --title "CMW500 Auto Test $env:GITHUB_REF_NAME" `
+            --generate-notes

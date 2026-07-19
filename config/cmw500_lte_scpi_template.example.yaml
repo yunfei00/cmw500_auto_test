@@ -7,12 +7,17 @@ lte:
   setup:
     - "INST LTE"
     - "CONFigure:LTE:SIGN:BAND {band_number}"
+    - "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:DL {bw}"
     - "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
+    - "CONFigure:LTE:SIGN:EBLer:SFRames {packet_count}"
   set_rx_level:
     - "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
   measure_bler:
     query: "FETCh:LTE:SIGN:BLER?"
     parser: "first_float"
-    fallback_simulation: true
+    fallback_simulation: false
   cleanup:
-    - "SYST:ERR?"
+    - type: query_and_assert
+      command: "SYST:ERR?"
+      parser: "regex"
+      expected: '^\s*0(?:,|$)'

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from core.channel_config import normalize_band
+from core.paths import resource_path, user_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +126,7 @@ class LteTestChannelSelection:
 
 
 def default_lte_channel_config_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "configs" / "lte_channel_config.xlsx"
+    return user_data_dir() / "configs" / "lte_channel_config.xlsx"
 
 
 def parse_int_list(value: Any) -> list[int]:
@@ -168,9 +171,12 @@ def parse_float_value(value: Any, default: float = 0.0) -> float:
     if not text:
         return default
     try:
-        return float(text)
+        parsed = float(text)
     except (TypeError, ValueError) as exc:
         raise LTEChannelConfigError(f"无法解析浮点数：{value}") from exc
+    if not math.isfinite(parsed):
+        raise LTEChannelConfigError(f"数值必须是有限值：{value}")
+    return parsed
 
 
 def parse_yes_no(value: Any) -> bool:
@@ -212,8 +218,13 @@ class LTEChannelConfigManager:
         if self.path.exists():
             return self.path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        write_default_lte_channel_excel(self.path)
-        logger.info("已自动生成默认 LTE 信道配置文件：%s", self.path)
+        bundled_path = resource_path("configs/lte_channel_config.xlsx")
+        if bundled_path.is_file() and bundled_path.resolve() != self.path.resolve():
+            shutil.copy2(bundled_path, self.path)
+            logger.info("已复制内置 LTE 信道配置文件：%s", self.path)
+        else:
+            write_default_lte_channel_excel(self.path)
+            logger.info("已自动生成默认 LTE 信道配置文件：%s", self.path)
         return self.path
 
     def load(self, path: Path | str | None = None) -> None:
@@ -372,7 +383,7 @@ class LTEChannelConfigManager:
         except (LTEChannelConfigError, ValueError) as exc:
             raise LTEChannelConfigError(str(exc)) from exc
 
-        return LTEBandChannelConfig(
+        band_config = LTEBandChannelConfig(
             band=band,
             is_fixed_channel=is_fixed_channel,
             begin=begin,
@@ -387,6 +398,38 @@ class LTEChannelConfigManager:
             three_channel_bw=three_channel_bw,
             three_channels=three_channels,
         )
+        self._validate_band_config(band_config)
+        return band_config
+
+    @staticmethod
+    def _validate_band_config(config: LTEBandChannelConfig) -> None:
+        if config.loss_db < 0:
+            raise LTEChannelConfigError("线损不能为负数")
+
+        range_values = (config.begin, config.end, config.step)
+        if any(value is not None for value in range_values):
+            if any(value is None for value in range_values):
+                raise LTEChannelConfigError("begin、end、step 必须同时填写")
+            assert config.begin is not None and config.end is not None and config.step is not None
+            if config.begin < 0 or config.end < 0:
+                raise LTEChannelConfigError("信道不能为负数")
+            if config.end < config.begin:
+                raise LTEChannelConfigError("end 不能小于 begin")
+            if config.step <= 0:
+                raise LTEChannelConfigError("step 必须大于 0")
+            if config.bw <= 0:
+                raise LTEChannelConfigError("配置遍历信道时 bw 必须大于 0")
+
+        channel_groups = (
+            ("转盘", config.turntable_channels, config.turntable_bw),
+            ("top", config.top_channels, config.top_bw),
+            ("三信道", config.three_channels, config.three_channel_bw),
+        )
+        for name, channels, bandwidth in channel_groups:
+            if any(channel < 0 for channel in channels):
+                raise LTEChannelConfigError(f"{name}信道不能为负数")
+            if channels and bandwidth <= 0:
+                raise LTEChannelConfigError(f"{name}配置有信道时带宽必须大于 0")
 
 
 def write_default_lte_channel_excel(path: Path) -> None:
