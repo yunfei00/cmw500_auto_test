@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -293,12 +294,14 @@ def test_signing_can_be_made_mandatory_without_storing_a_certificate(
         build_windows.sign_windows_executable()
 
 
-@pytest.mark.parametrize("filename", ["requirements.txt", "requirements-build.txt"])
-def test_direct_dependencies_are_exactly_pinned(filename: str) -> None:
-    lines = [
-        line.strip()
-        for line in (PROJECT_ROOT / filename).read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
+@pytest.mark.parametrize("section", ["runtime", "development"])
+def test_direct_dependencies_are_exactly_pinned(section: str) -> None:
+    config = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    lines = config["project"]["dependencies"] if section == "runtime" else [
+        dependency
+        for group in config["dependency-groups"].values()
+        for dependency in group
+        if isinstance(dependency, str)
     ]
     assert lines
     assert all(line.count("==") == 1 for line in lines)

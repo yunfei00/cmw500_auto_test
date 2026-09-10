@@ -22,12 +22,19 @@
 
 ## 开发环境运行
 
-要求 Python 3.11+：
+先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)。开发基准为 Python 3.11，支持范围为 `>=3.11,<3.13`：
 
 ```powershell
-python -m pip install --requirement requirements.txt
-python main.py
+uv python install 3.11
+uv sync
+uv run python main.py
 ```
+
+从已有虚拟环境迁移时，先执行一次 `uv sync --managed-python --python 3.11`，确保 `.venv` 使用 uv 安装的 Python。项目优先使用 uv 管理的解释器，避免继续沿用系统中旧的 Python / Windows 运行库。
+
+`pyproject.toml` / `uv.lock` 是唯一正式依赖源，旧 requirements 文件已移除。提交依赖变更时必须同时提交更新后的锁文件；使用 `uv lock --check` 检查一致性，CI 使用 `uv sync --locked`。默认同步 dev 组，其中包含完整测试所需的 build 组；仅运行程序可使用 `uv sync --no-dev` 和 `uv run --no-dev python main.py`。
+
+项目按源码入口运行，不安装为 Python 分发包。项目元数据版本 `0.2.0.dev0` 对应现有 `VERSION` 中的 `0.2.0-dev`，不改变应用版本。
 
 VISA 连接优先使用系统已安装的 NI/Keysight/R&S VISA；系统后端不可用时会回退到随依赖安装的 `pyvisa-py`。Socket 模式默认使用 TCP 5025。
 
@@ -99,7 +106,7 @@ BLER parser 支持 `first_float`、`second_float`、`csv_index:N`。Attach/状�
 ## 测试
 
 ```powershell
-python -m pytest -q --basetemp=.pytest-tmp
+uv run pytest
 ```
 
 测试覆盖扫描/重试/线损、状态终态、安全停止、SCPI 模板与控制器、Socket/VISA 异常、汇总、Excel 报告以及构建/归档校验。
@@ -107,10 +114,9 @@ python -m pytest -q --basetemp=.pytest-tmp
 ## Windows 构建与发布
 
 ```powershell
-python -m pip install --requirement requirements.txt
-python -m pip install --requirement requirements-build.txt
-python scripts/build_windows.py
-python scripts/package_release.py --version dev
+uv sync --locked --group build
+uv run --locked --group build python scripts/build_windows.py
+uv run --locked --group build python scripts/package_release.py --version dev
 ```
 
 构建会检查关键资源、运行时版本、构建 commit、PyVISA 后端、归档内容和 SHA-256 清单。开发构建允许未签名，但会明确告警；正式版本构建和归档都会独立拒绝未通过 Authenticode 验证的 EXE。

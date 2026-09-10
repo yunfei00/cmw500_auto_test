@@ -1,12 +1,19 @@
 # 项目当前状态
 
-最后更新：2026-07-19
+最后更新：2026-09-10
 
 当前版本：`0.2.0-dev`
 
 当前阶段：P0 软件功能闭环完成，商业发布外部验收待完成
 
 发布结论：Release Candidate；正式商业发布仍为 NO-GO
+
+## 环境管理更新（2026-09-10）
+
+- 依赖统一迁移至 `pyproject.toml` / `uv.lock`，Python 基准为 3.11。
+- 使用 `uv sync` 安装、`uv run python main.py` 启动、`uv run pytest` 测试。
+- GitHub Actions 使用 uv 同步锁文件并运行原 Windows EXE 构建流程。
+- 旧 requirements 清单已移除；本轮不修改测试业务、仪表通信或 UI。
 
 ## 本轮已完成的 P0
 
@@ -64,7 +71,7 @@
 测试命令：
 
 ```powershell
-python -m pytest -q --basetemp=.pytest-tmp
+uv run pytest
 ```
 
 ## 商业发布仍未完成的外部门禁
