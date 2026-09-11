@@ -92,6 +92,28 @@ def test_recommended_template_passes_real_run_preflight() -> None:
     manager.validate_for_real_run()
 
 
+def test_recommended_template_confirms_rf_off_and_keeps_cleanup_diagnostic() -> None:
+    manager = ScpiTemplateManager()
+    manager.load_file("config/cmw500_lte_scpi_template.cmw500_recommended.yaml")
+    template = manager.get_lte_template()
+
+    assert template is not None
+    assert len(template.cell_off) == 6
+    assert [step.operation for step in template.cell_off] == [
+        "write",
+        "query",
+        "write",
+        "query",
+        "write",
+        "query_and_assert",
+    ]
+    assert template.cell_off[-1].command == "SOURce:LTE:SIGN:CELL:STATe?"
+    assert template.cell_off[-1].expected == r"^\s*OFF\s*$"
+    assert len(template.cleanup) == 1
+    assert template.cleanup[0].operation == "query"
+    assert template.cleanup[0].command == "SYST:ERR?"
+
+
 def test_real_run_preflight_rejects_fallback_flags(tmp_path) -> None:
     path = tmp_path / "unsafe.json"
     path.write_text(
