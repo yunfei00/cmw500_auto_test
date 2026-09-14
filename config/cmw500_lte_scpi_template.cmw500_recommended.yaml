@@ -4,23 +4,18 @@ instrument:
   default_port: 5025
 
 lte:
-  # LTE V1 per-cell order after the run-level preparation has completed:
-  # DMODE -> Band -> Bandwidth -> Channel -> initial DL power -> BLER setup.
-  # Run-level preparation (COM route / EATT / UE Report / MAXP+P-Max / RMC /
-  # Security) is executed by core.lte_v1_workflow before the first cell.
+  # Per-cell configuration. CMW500-specific run-level settings such as COM
+  # route, external attenuation, UE Report, P-Max, RMC and security are owned
+  # by RealCMW500. Duplex mode is also selected by RealCMW500 before setup.
   setup:
-    - type: write
-      command: "CONFigure:LTE:SIGN:PCC:DMODe {duplex_mode}"
     - type: write
       command: "CONFigure:LTE:SIGN:PCC:BAND OB{band_number}"
     - type: write
       command: "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:DL {bw}"
     - type: write
       command: "CONFigure:LTE:SIGN:RFSettings:CHANnel:DL {channel}"
-    # Query steps always consume their response and are saved in command_trace.
     - type: query
       command: "CONFigure:LTE:SIGN:RFSettings:FREQuency:DL?"
-    # Step 8: put DL at the configured maximum/start level before Cell ON.
     - type: write
       command: "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
     - type: write
@@ -81,9 +76,6 @@ lte:
       parser: "regex"
       expected: '^\s*OFF\s*$'
 
-  # SYST:ERR? is diagnostic only. A queued SCPI error must not be confused
-  # with an unconfirmed RF/Cell OFF state. The response is still consumed and
-  # retained in command_trace for troubleshooting.
   cleanup:
     - type: query
       command: "SYST:ERR?"
