@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -16,13 +16,21 @@ from ui.right_panel import RightPanel
 
 
 class MainWindow(QMainWindow):
+    SETTINGS_ORG = "cmw500_tool"
+    SETTINGS_APP = "cmw500_auto_test"
+    LAST_INSTRUMENT_MODE_KEY = "instrument/last_mode"
+    LAST_CONNECTION_TYPE_KEY = "instrument/last_connection_type"
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"CMW500 手机灵敏度自动化测试工具 {APP_VERSION}")
         self.resize(1500, 900)
+        self.settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
 
         self.left_panel = LeftPanel()
         self._enhance_lte_panel()
+        self._restore_instrument_selection()
+        self._bind_instrument_selection_persistence()
         self.center_panel = CenterPanel()
         self.right_panel = RightPanel()
 
@@ -45,6 +53,47 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
         self.setStyleSheet(self._style_sheet())
         self.right_panel.append_log("INFO", f"{self.windowTitle()} 已启动")
+        self.right_panel.append_log(
+            "INFO",
+            "已恢复上次仪表选择："
+            f"{self.left_panel.instrument_mode_combo.currentText()} / "
+            f"{self.left_panel.connection_type_combo.currentText()}",
+        )
+
+    def _restore_instrument_selection(self) -> None:
+        """Restore the operator's last instrument/transport selection."""
+        mode = self.settings.value(self.LAST_INSTRUMENT_MODE_KEY, "Fake", str)
+        connection_type = self.settings.value(
+            self.LAST_CONNECTION_TYPE_KEY,
+            "VISA（推荐）",
+            str,
+        )
+
+        if isinstance(mode, str):
+            index = self.left_panel.instrument_mode_combo.findText(mode)
+            if index >= 0:
+                self.left_panel.instrument_mode_combo.setCurrentIndex(index)
+
+        if isinstance(connection_type, str):
+            index = self.left_panel.connection_type_combo.findText(connection_type)
+            if index >= 0:
+                self.left_panel.connection_type_combo.setCurrentIndex(index)
+
+    def _bind_instrument_selection_persistence(self) -> None:
+        self.left_panel.instrument_mode_combo.currentTextChanged.connect(
+            self._save_instrument_mode
+        )
+        self.left_panel.connection_type_combo.currentTextChanged.connect(
+            self._save_connection_type
+        )
+
+    def _save_instrument_mode(self, mode: str) -> None:
+        self.settings.setValue(self.LAST_INSTRUMENT_MODE_KEY, mode)
+        self.settings.sync()
+
+    def _save_connection_type(self, connection_type: str) -> None:
+        self.settings.setValue(self.LAST_CONNECTION_TYPE_KEY, connection_type)
+        self.settings.sync()
 
     def _enhance_lte_panel(self) -> None:
         """Keep the three LTE configuration groups collapsible."""
