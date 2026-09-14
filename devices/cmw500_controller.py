@@ -78,6 +78,7 @@ class RealCMW500(InstrumentBase):
 
     is_simulation = False
     data_source = "REAL_CMW500"
+    uses_external_cable_loss_compensation = True
 
     def __init__(
         self,
