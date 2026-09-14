@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import datetime
 import hashlib
 from pathlib import Path
 import re
@@ -83,6 +83,8 @@ class LeftPanel(QScrollArea):
     SETTINGS_ORG = "cmw500_tool"
     SETTINGS_APP = "cmw500_auto_test"
     LAST_VISA_RESOURCE_KEY = "instrument/last_visa_resource"
+    CALIBRATION_ID_KEY = "instrument/calibration_id"
+    CALIBRATION_DUE_KEY = "instrument/calibration_due_date"
 
     def __init__(self) -> None:
         super().__init__()
@@ -120,6 +122,8 @@ class LeftPanel(QScrollArea):
         self.package_name_edit = QLineEdit()
         self.operator_edit = QLineEdit()
         self.dut_serial_edit = QLineEdit()
+        self.com_port_combo = QComboBox()
+        self.com_port_combo.addItems(["COM1", "COM2", "COM3", "COM4"])
         self.start_button: QPushButton | None = None
         self.pause_button: QPushButton | None = None
         self.stop_button: QPushButton | None = None
@@ -161,6 +165,7 @@ class LeftPanel(QScrollArea):
 
         self.setWidget(container)
         self._restore_last_instrument_resource()
+        self._restore_calibration_metadata()
         self._init_lte_channel_config()
         self._init_default_scpi_template()
 
@@ -228,7 +233,7 @@ class LeftPanel(QScrollArea):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
-        self.cable_loss_spin = self._double_spin(0.0, " dB", 0.0, 100.0)
+        self.cable_loss_spin = self._double_spin(35.0, " dB", 0.0, 100.0)
         self.sensitivity_upper_spin = self._double_spin(-70.0, " dBm", -200.0, 50.0)
         self.start_level_spin = self._double_spin(-70.0, " dBm", -200.0, 50.0)
         self.stop_level_spin = self._double_spin(-120.0, " dBm", -200.0, 50.0)
@@ -240,6 +245,7 @@ class LeftPanel(QScrollArea):
         self.retry_count_spin = self._spin(1, 0, 100)
 
         form.addRow("线损：", self.cable_loss_spin)
+        form.addRow("COM口：", self.com_port_combo)
         form.addRow("灵敏度上限：", self.sensitivity_upper_spin)
         form.addRow("初始电平：", self.start_level_spin)
         form.addRow("结束电平：", self.stop_level_spin)
@@ -342,9 +348,11 @@ class LeftPanel(QScrollArea):
         )
         self.instrument_mode_warning_label.setWordWrap(True)
         self.calibration_id_edit = QLineEdit()
-        self.calibration_id_edit.setPlaceholderText("校准证书/资产编号")
+        self.calibration_id_edit.setPlaceholderText("可选；填写后自动记忆")
         self.calibration_due_date_edit = QLineEdit()
-        self.calibration_due_date_edit.setPlaceholderText("YYYY-MM-DD")
+        self.calibration_due_date_edit.setPlaceholderText("可选；YYYY-MM-DD；填写后自动记忆")
+        self.calibration_id_edit.editingFinished.connect(self._save_calibration_metadata)
+        self.calibration_due_date_edit.editingFinished.connect(self._save_calibration_metadata)
 
         form.addRow("仪表模式：", self.instrument_mode_combo)
         form.addRow("连接方式：", self.connection_type_combo)
@@ -865,6 +873,25 @@ class LeftPanel(QScrollArea):
             return
         self.settings.setValue(self.LAST_VISA_RESOURCE_KEY, target)
 
+    def _restore_calibration_metadata(self) -> None:
+        calibration_id = self.settings.value(self.CALIBRATION_ID_KEY, "", str)
+        calibration_due = self.settings.value(self.CALIBRATION_DUE_KEY, "", str)
+        self.calibration_id_edit.setText(
+            calibration_id.strip() if isinstance(calibration_id, str) else ""
+        )
+        self.calibration_due_date_edit.setText(
+            calibration_due.strip() if isinstance(calibration_due, str) else ""
+        )
+
+    def _save_calibration_metadata(self) -> None:
+        self.settings.setValue(
+            self.CALIBRATION_ID_KEY, self.calibration_id_edit.text().strip()
+        )
+        self.settings.setValue(
+            self.CALIBRATION_DUE_KEY, self.calibration_due_date_edit.text().strip()
+        )
+        self.settings.sync()
+
     def _scan_visa_resources(self) -> None:
         if self._background_action_running():
             self._log("WARNING", "已有后台设备操作正在执行，请等待完成")
@@ -1123,6 +1150,8 @@ class LeftPanel(QScrollArea):
                             }
                         )
 
+        com_match = re.fullmatch(r"COM([1-4])", self.com_port_combo.currentText().strip().upper())
+        com_port = int(com_match.group(1)) if com_match else 1
         return LteTestConfig(
             cable_loss=self.cable_loss_spin.value(),
             sensitivity_upper=self.sensitivity_upper_spin.value(),
@@ -1140,6 +1169,7 @@ class LeftPanel(QScrollArea):
             lte_test_items=self._selected_lte_test_items(),
             test_mode=self._current_test_mode(),
             data=data,
+            com_port=com_port,
         )
 
     def _validate_lte_channel_config(self, config: LteTestConfig) -> bool:
@@ -1151,6 +1181,9 @@ class LeftPanel(QScrollArea):
             return False
         if config.cable_loss < 0:
             QMessageBox.warning(self, "参数错误", "全局线损不能为负数")
+            return False
+        if config.com_port not in {1, 2, 3, 4}:
+            QMessageBox.warning(self, "参数错误", "COM 口仅支持 COM1～COM4")
             return False
         for row in config.data:
             bandwidth = float(row.get("bw", 0.0))
@@ -1200,32 +1233,11 @@ class LeftPanel(QScrollArea):
         if self.instrument_mode_combo.currentText() == "Real CMW500":
             operator = self.operator_edit.text().strip()
             dut_serial = self.dut_serial_edit.text().strip()
-            calibration_id = self.calibration_id_edit.text().strip()
-            calibration_due_text = self.calibration_due_date_edit.text().strip()
             if not operator or not dut_serial:
                 QMessageBox.warning(
                     self,
                     "追溯信息缺失",
                     "Real CMW500 正式测试必须填写测试人员和 DUT 标识",
-                )
-                return False
-            if not calibration_id or not calibration_due_text:
-                QMessageBox.warning(
-                    self,
-                    "校准信息缺失",
-                    "Real CMW500 正式测试必须填写校准标识和校准有效期",
-                )
-                return False
-            try:
-                calibration_due = date.fromisoformat(calibration_due_text)
-            except ValueError:
-                QMessageBox.warning(self, "校准信息错误", "校准有效期必须使用 YYYY-MM-DD 格式")
-                return False
-            if calibration_due < date.today():
-                QMessageBox.warning(
-                    self,
-                    "校准已过期",
-                    f"仪表校准有效期 {calibration_due_text} 已过期，禁止开始正式测试",
                 )
                 return False
             if not self.scpi_template_manager or not self.scpi_template_manager.has_template():
@@ -1238,10 +1250,12 @@ class LeftPanel(QScrollArea):
                 QMessageBox.warning(self, "SCPI 模板预检失败", str(exc))
                 return False
 
+        self._save_calibration_metadata()
         return True
 
     def _log_test_channel_summary(self, config: LteTestConfig) -> None:
         self._log("INFO", "======== 本次测试信道信息 ========")
+        self._log("INFO", f"CMW500 RF 路由：COM{config.com_port}，全局线损：{config.cable_loss:g} dB")
         optional_items = config.lte_test_items
         if optional_items:
             self._log("INFO", f"已勾选测试项：{', '.join(optional_items)}")
@@ -1444,11 +1458,8 @@ class LeftPanel(QScrollArea):
         self.worker_thread = None
 
     def _capture_worker_state(self, state: str) -> None:
-        # This slot is deliberately safe for DirectConnection from the worker thread:
-        # it only replaces simple Python state and never touches a Qt widget.
         self._worker_final_status = str(state)
         if self._worker_final_status == "FAILED_UNSAFE":
-            # Latch across subsequent state changes/runs until explicit operator action.
             self._unsafe_exit_pending = True
 
     def _finalize_test_run(self) -> None:
@@ -1592,8 +1603,6 @@ class LeftPanel(QScrollArea):
         thread = self.worker_thread
         if self.worker and thread and thread.isRunning():
             self.worker.stop()
-            # quit() is thread-safe and lets wait() complete after worker.run() returns,
-            # even though the UI event loop is blocked inside closeEvent.
             thread.quit()
             if not thread.wait(timeout_ms):
                 return False
