@@ -1,8 +1,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QComboBox,
-    QFormLayout,
     QGroupBox,
     QMainWindow,
     QMessageBox,
@@ -49,11 +47,7 @@ class MainWindow(QMainWindow):
         self.right_panel.append_log("INFO", f"{self.windowTitle()} 已启动")
 
     def _enhance_lte_panel(self) -> None:
-        """Apply V1 LTE panel usability defaults without changing test flow."""
-        # V1 default cable loss is 35 dB. The existing test flow continues to
-        # read this value from LeftPanel when building the LTE test config.
-        self.left_panel.cable_loss_spin.setValue(35.0)
-
+        """Keep the three LTE configuration groups collapsible."""
         tabs = self.left_panel.standard_group.findChild(QTabWidget)
         if tabs is None or tabs.count() == 0:
             return
@@ -68,14 +62,6 @@ class MainWindow(QMainWindow):
         )
         target_titles = {"仪表配置", "测试项选择", "Band 配置"}
         group_map = {group.title(): group for group in lte_groups if group.title() in target_titles}
-
-        instrument_group = group_map.get("仪表配置")
-        if instrument_group is not None:
-            form = instrument_group.layout()
-            if isinstance(form, QFormLayout):
-                self.left_panel.com_port_combo = QComboBox()
-                self.left_panel.com_port_combo.addItems(["COM1", "COM2", "COM3", "COM4"])
-                form.insertRow(1, "COM口：", self.left_panel.com_port_combo)
 
         for title in ("仪表配置", "测试项选择", "Band 配置"):
             group = group_map.get(title)
