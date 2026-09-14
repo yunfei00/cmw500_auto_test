@@ -1,6 +1,15 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    QTabWidget,
+    QWidget,
+)
 
 from app_info import APP_VERSION
 from ui.center_panel import CenterPanel
@@ -15,6 +24,7 @@ class MainWindow(QMainWindow):
         self.resize(1500, 900)
 
         self.left_panel = LeftPanel()
+        self._enhance_lte_panel()
         self.center_panel = CenterPanel()
         self.right_panel = RightPanel()
 
@@ -37,6 +47,55 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
         self.setStyleSheet(self._style_sheet())
         self.right_panel.append_log("INFO", f"{self.windowTitle()} 已启动")
+
+    def _enhance_lte_panel(self) -> None:
+        """Apply V1 LTE panel usability defaults without changing test flow."""
+        # V1 default cable loss is 35 dB. The existing test flow continues to
+        # read this value from LeftPanel when building the LTE test config.
+        self.left_panel.cable_loss_spin.setValue(35.0)
+
+        tabs = self.left_panel.standard_group.findChild(QTabWidget)
+        if tabs is None or tabs.count() == 0:
+            return
+
+        lte_tab = tabs.widget(0)
+        if lte_tab is None:
+            return
+
+        lte_groups = lte_tab.findChildren(
+            QGroupBox,
+            options=Qt.FindChildOption.FindDirectChildrenOnly,
+        )
+        target_titles = {"仪表配置", "测试项选择", "Band 配置"}
+        group_map = {group.title(): group for group in lte_groups if group.title() in target_titles}
+
+        instrument_group = group_map.get("仪表配置")
+        if instrument_group is not None:
+            form = instrument_group.layout()
+            if isinstance(form, QFormLayout):
+                self.left_panel.com_port_combo = QComboBox()
+                self.left_panel.com_port_combo.addItems(["COM1", "COM2", "COM3", "COM4"])
+                form.insertRow(1, "COM口：", self.left_panel.com_port_combo)
+
+        for title in ("仪表配置", "测试项选择", "Band 配置"):
+            group = group_map.get(title)
+            if group is not None:
+                self._make_group_collapsible(group)
+
+    def _make_group_collapsible(self, group: QGroupBox) -> None:
+        """Use the group title checkbox as a compact expand/collapse control."""
+        group.setCheckable(True)
+        group.setChecked(True)
+
+        def set_expanded(expanded: bool) -> None:
+            for child in group.findChildren(
+                QWidget,
+                options=Qt.FindChildOption.FindDirectChildrenOnly,
+            ):
+                child.setVisible(expanded)
+            group.updateGeometry()
+
+        group.toggled.connect(set_expanded)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.left_panel.is_test_running():
