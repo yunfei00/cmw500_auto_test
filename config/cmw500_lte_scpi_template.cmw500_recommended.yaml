@@ -4,9 +4,13 @@ instrument:
   default_port: 5025
 
 lte:
+  # LTE V1 per-cell order after the run-level preparation has completed:
+  # DMODE -> Band -> Bandwidth -> Channel -> initial DL power -> BLER setup.
+  # Run-level preparation (COM route / EATT / UE Report / MAXP+P-Max / RMC /
+  # Security) is executed by core.lte_v1_workflow before the first cell.
   setup:
     - type: write
-      command: "INST LTE"
+      command: "CONFigure:LTE:SIGN:PCC:DMODe {duplex_mode}"
     - type: write
       command: "CONFigure:LTE:SIGN:PCC:BAND OB{band_number}"
     - type: write
@@ -16,6 +20,9 @@ lte:
     # Query steps always consume their response and are saved in command_trace.
     - type: query
       command: "CONFigure:LTE:SIGN:RFSettings:FREQuency:DL?"
+    # Step 8: put DL at the configured maximum/start level before Cell ON.
+    - type: write
+      command: "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
     - type: write
       command: "CONFigure:LTE:SIGN:EBLer:REPetition SING"
     - type: write
