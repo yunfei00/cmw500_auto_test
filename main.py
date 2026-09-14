@@ -4,6 +4,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from app_info import APP_ID, APP_NAME, APP_VERSION, ORGANIZATION_NAME
+from core.scpi_duplex_compat import apply_scpi_duplex_compat
 from core.lte_v1_workflow import apply_lte_v1_workflow
 from core.v1_calibration_policy import apply_optional_calibration_policy
 from ui.main_window import MainWindow
@@ -30,9 +31,9 @@ def main() -> int:
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName(ORGANIZATION_NAME)
 
-    # Install the agreed LTE V1 preparation and scan sequence before any test
-    # worker is created. The hook is idempotent and keeps the change isolated
-    # from the already-validated generic worker state machine.
+    # The V1 LTE template uses {duplex_mode}. Install its render context before
+    # any template validation can run, then install the workflow/policy hooks.
+    apply_scpi_duplex_compat()
     apply_lte_v1_workflow()
     apply_optional_calibration_policy()
 
