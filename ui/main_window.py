@@ -20,6 +20,9 @@ class MainWindow(QMainWindow):
     SETTINGS_APP = "cmw500_auto_test"
     LAST_INSTRUMENT_MODE_KEY = "instrument/last_mode"
     LAST_CONNECTION_TYPE_KEY = "instrument/last_connection_type"
+    LTE_CABLE_LOSS_KEY = "lte/cable_loss"
+    LTE_COM_PORT_KEY = "lte/com_port"
+    LTE_TEST_MODE_KEY = "lte/test_mode"
 
     def __init__(self) -> None:
         super().__init__()
@@ -30,7 +33,9 @@ class MainWindow(QMainWindow):
         self.left_panel = LeftPanel()
         self._enhance_lte_panel()
         self._restore_instrument_selection()
+        self._restore_lte_operator_preferences()
         self._bind_instrument_selection_persistence()
+        self._bind_lte_operator_preference_persistence()
         self.center_panel = CenterPanel()
         self.right_panel = RightPanel()
 
@@ -58,6 +63,13 @@ class MainWindow(QMainWindow):
             "已恢复上次仪表选择："
             f"{self.left_panel.instrument_mode_combo.currentText()} / "
             f"{self.left_panel.connection_type_combo.currentText()}",
+        )
+        self.right_panel.append_log(
+            "INFO",
+            "已恢复上次 LTE 设置："
+            f"{self.left_panel.com_port_combo.currentText()} / "
+            f"线损 {self.left_panel.cable_loss_spin.value():g} dB / "
+            f"{self.left_panel._current_test_mode()}",
         )
 
     def _restore_instrument_selection(self) -> None:
@@ -93,6 +105,55 @@ class MainWindow(QMainWindow):
 
     def _save_connection_type(self, connection_type: str) -> None:
         self.settings.setValue(self.LAST_CONNECTION_TYPE_KEY, connection_type)
+        self.settings.sync()
+
+    def _restore_lte_operator_preferences(self) -> None:
+        raw_loss = self.settings.value(self.LTE_CABLE_LOSS_KEY, 35.0)
+        try:
+            cable_loss = float(raw_loss)
+        except (TypeError, ValueError):
+            cable_loss = 35.0
+        if self.left_panel.cable_loss_spin.minimum() <= cable_loss <= self.left_panel.cable_loss_spin.maximum():
+            self.left_panel.cable_loss_spin.setValue(cable_loss)
+
+        com_port = str(self.settings.value(self.LTE_COM_PORT_KEY, "COM1")).strip().upper()
+        if self.left_panel.com_port_combo.findText(com_port) >= 0:
+            self.left_panel.com_port_combo.setCurrentText(com_port)
+
+        test_mode = str(self.settings.value(self.LTE_TEST_MODE_KEY, "单主")).strip()
+        mode_buttons = {
+            "单主": self.left_panel.single_main_radio,
+            "单分": self.left_panel.single_div_radio,
+            "主分集": self.left_panel.main_div_radio,
+        }
+        button = mode_buttons.get(test_mode)
+        if button is not None:
+            button.setChecked(True)
+
+    def _bind_lte_operator_preference_persistence(self) -> None:
+        self.left_panel.cable_loss_spin.valueChanged.connect(
+            lambda _value: self._save_lte_operator_preferences()
+        )
+        self.left_panel.com_port_combo.currentTextChanged.connect(
+            lambda _text: self._save_lte_operator_preferences()
+        )
+        self.left_panel.mode_group.buttonClicked.connect(
+            lambda _button: self._save_lte_operator_preferences()
+        )
+
+    def _save_lte_operator_preferences(self) -> None:
+        self.settings.setValue(
+            self.LTE_CABLE_LOSS_KEY,
+            self.left_panel.cable_loss_spin.value(),
+        )
+        self.settings.setValue(
+            self.LTE_COM_PORT_KEY,
+            self.left_panel.com_port_combo.currentText(),
+        )
+        self.settings.setValue(
+            self.LTE_TEST_MODE_KEY,
+            self.left_panel._current_test_mode(),
+        )
         self.settings.sync()
 
     def _enhance_lte_panel(self) -> None:
@@ -133,6 +194,7 @@ class MainWindow(QMainWindow):
         group.toggled.connect(set_expanded)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._save_lte_operator_preferences()
         if self.left_panel.is_test_running():
             answer = QMessageBox.question(
                 self,
