@@ -4,6 +4,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from app_info import APP_ID, APP_NAME, APP_VERSION, ORGANIZATION_NAME
+from core.lte_v1_workflow import apply_lte_v1_workflow
 from ui.main_window import MainWindow
 
 
@@ -27,6 +28,11 @@ def main() -> int:
     app.setApplicationDisplayName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName(ORGANIZATION_NAME)
+
+    # Install the agreed LTE V1 preparation and scan sequence before any test
+    # worker is created. The hook is idempotent and keeps the change isolated
+    # from the already-validated generic worker state machine.
+    apply_lte_v1_workflow()
 
     window = MainWindow()
     window.show()
