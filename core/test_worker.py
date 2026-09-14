@@ -84,6 +84,7 @@ class TestWorker(QObject):
             self._instrument_session_started = True
 
             self._log_real_instrument_template_state()
+            self._configure_lte_run()
 
             for current, item in enumerate(self.test_plan, start=1):
                 self._cooperate()
@@ -202,6 +203,8 @@ class TestWorker(QObject):
             raise ValueError("retry_count 不能小于 0")
         if self.config.settle_time < 0:
             raise ValueError("settle_time 不能小于 0")
+        if int(self.config.com_port) not in {1, 2, 3, 4}:
+            raise ValueError("com_port 仅支持 COM1..COM4")
         judge_bler(0.0, float(self.config.bler_threshold))
 
     def _validate_test_plan(self) -> None:
@@ -241,6 +244,28 @@ class TestWorker(QObject):
         set_cancel_checker = getattr(self.instrument, "set_cancel_checker", None)
         if set_cancel_checker:
             set_cancel_checker(self._is_stopped)
+
+    def _configure_lte_run(self) -> None:
+        """Apply run-level LTE signaling configuration before the first Cell ON."""
+
+        method = getattr(self.instrument, "lte_prepare_run", None)
+        if not callable(method):
+            return
+        self.log_signal.emit(
+            "INFO",
+            f"LTE 前置配置：COM{self.config.com_port}，输入/输出线损={self.config.cable_loss:g} dB",
+        )
+        self._call_with_supported_kwargs(
+            method,
+            com_port=int(self.config.com_port),
+            cable_loss=float(self.config.cable_loss),
+        )
+        self._raise_if_stopped()
+        self._emit_instrument_warning()
+        self.log_signal.emit(
+            "INFO",
+            "LTE 前置配置完成：COM/线损/UE Report/MAXP/P-Max/RMC/Security",
+        )
 
     def _prepare_instrument_for_cleanup(self) -> bool:
         """Remove cancellation and restore I/O so emergency Cell OFF can run."""
@@ -365,8 +390,10 @@ class TestWorker(QObject):
         current: int,
         total: int,
     ) -> bool:
+        # Global cable loss is configured in CMW500 EATTenuation. Do not add it
+        # again to RS EPRE. Excel per-channel loss remains an additional offset.
         total_loss = float(self.config.cable_loss) + float(item.loss_db)
-        instrument_level = dut_level + total_loss
+        instrument_level = dut_level + float(item.loss_db)
         measured_item = replace(item, rx_level=dut_level)
         max_attempts = int(self.config.retry_count) + 1
 
@@ -375,7 +402,8 @@ class TestWorker(QObject):
             self.log_signal.emit(
                 "INFO",
                 f"{phase} {item.band}/{item.channel} DUT={dut_level:g} dBm, "
-                f"仪表={instrument_level:g} dBm, 尝试 {attempt}/{max_attempts}",
+                f"CMW RS EPRE={instrument_level:g} dBm, EATT={self.config.cable_loss:g} dB, "
+                f"尝试 {attempt}/{max_attempts}",
             )
             try:
                 self.instrument.set_rx_level(instrument_level)
@@ -424,6 +452,7 @@ class TestWorker(QObject):
                 phase=phase,
                 instrument_level=instrument_level,
             )
+            test_result.total_loss = total_loss
             self.row_signal.emit(test_result)
             self._emit_summary(measured_item, current, total, phase, attempt)
             self.log_signal.emit(
@@ -497,7 +526,8 @@ class TestWorker(QObject):
                 test_mode=item.test_mode,
                 bw=item.bw,
                 packet_count=self.config.packet_count,
-                cable_loss=float(self.config.cable_loss) + float(item.loss_db),
+                cable_loss=float(self.config.cable_loss),
+                initial_rx_level=float(self.config.start_level),
             )
             return
         self._setup_lte_compat(item)
@@ -555,7 +585,8 @@ class TestWorker(QObject):
             test_mode=item.test_mode,
             bw=item.bw,
             packet_count=self.config.packet_count,
-            cable_loss=float(self.config.cable_loss) + float(item.loss_db),
+            cable_loss=float(self.config.cable_loss),
+            initial_rx_level=float(self.config.start_level),
         )
 
     def _emit_instrument_warning(self) -> None:
@@ -603,7 +634,7 @@ class TestWorker(QObject):
     ) -> TestResult:
         total_loss = float(self.config.cable_loss) + float(item.loss_db)
         if instrument_level is None:
-            instrument_level = item.rx_level + total_loss
+            instrument_level = item.rx_level + float(item.loss_db)
         return TestResult(
             index=item.index,
             mode=item.mode,
