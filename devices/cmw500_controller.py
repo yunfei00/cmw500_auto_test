@@ -17,6 +17,15 @@ from devices.instrument_transport import (
 )
 
 
+_LTE_COM_ROUTES: dict[int, tuple[str, str, str, str]] = {
+    1: ("RF1C", "RX1", "RF1C", "TX1"),
+    2: ("RF2C", "RX1", "RF2C", "TX1"),
+    3: ("RF3C", "RX2", "RF3C", "TX2"),
+    4: ("RF4C", "RX2", "RF4C", "TX2"),
+}
+_LTE_TDD_BANDS = set(range(33, 54))
+
+
 def is_cmw500_idn(response: str) -> bool:
     """Return whether an IDN response identifies an R&S CMW/CMW500."""
 
@@ -37,12 +46,34 @@ def validate_cmw500_idn(response: str) -> str:
     return value
 
 
+def _normalize_csv(value: str) -> str:
+    return ",".join(
+        part.strip().strip('"').upper()
+        for part in str(value).strip().split(",")
+    )
+
+
+def _first_float(value: str) -> float:
+    match = re.search(r"[-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?", str(value))
+    if not match:
+        raise RuntimeError(f"无法从仪表响应解析数值：{value!r}")
+    return float(match.group(0))
+
+
+def _duplex_mode_for_band(band: str) -> str:
+    try:
+        number = int(str(band).strip().lstrip("Bb"))
+    except ValueError as exc:
+        raise ValueError(f"无法识别 LTE Band：{band}") from exc
+    return "TDD" if number in _LTE_TDD_BANDS else "FDD"
+
+
 class RealCMW500(InstrumentBase):
     """Real CMW500 controller.
 
-    This class never fabricates a measurement. The legacy
-    ``fallback_simulation`` argument is accepted for API compatibility only and
-    has no effect; all transport, timeout and parser errors are propagated.
+    This class owns CMW500-specific LTE signaling commands and never fabricates
+    a measurement. Transport, timeout, parser and verification errors are all
+    propagated to the worker so a real run fails closed.
     """
 
     is_simulation = False
@@ -65,6 +96,7 @@ class RealCMW500(InstrumentBase):
         self.current_bandwidth: float | str = 20.0
         self.current_packet_count = 1000
         self.current_cable_loss = 0.0
+        self.current_com_port = 1
         self.last_warning = (
             "RealCMW500 已忽略不安全的 fallback_simulation=True；真实测量不会回退模拟值"
             if self.fallback_simulation_requested
@@ -73,7 +105,6 @@ class RealCMW500(InstrumentBase):
         self.last_attach_response = ""
         self.last_commands: list[str] = []
         self.command_trace: list[dict[str, Any]] = []
-        # Compatibility alias for callers that prefer an explicit last-run name.
         self.last_command_trace = self.command_trace
         self._cancel_event = threading.Event()
         self._cancel_checker: Callable[[], bool] | None = None
@@ -166,6 +197,98 @@ class RealCMW500(InstrumentBase):
             )
         return responses
 
+    def lte_prepare_run(self, com_port: int = 1, cable_loss: float = 35.0) -> None:
+        """Configure LTE signaling settings that apply to the complete run.
+
+        Order is intentionally fixed: LTE app -> RF route -> input/output line
+        loss -> UE Report -> MAXP/P-Max -> RMC -> security. Every critical
+        setting is verified where the CMW500 exposes a direct query.
+        """
+
+        port = int(com_port)
+        if port not in _LTE_COM_ROUTES:
+            raise ValueError(f"LTE COM 口仅支持 COM1..COM4：COM{port}")
+        loss = float(cable_loss)
+        if not math.isfinite(loss) or loss < 0:
+            raise ValueError(f"LTE 线损必须为非负有限数值：{cable_loss}")
+
+        self._execute_operation("write", "INST LTE", "lte_prepare_run.app")
+
+        expected_route = ",".join(_LTE_COM_ROUTES[port])
+        route_query = "ROUTe:LTE:SIGN:SCENario:SCELl?"
+        current_route = self._execute_operation(
+            "query", route_query, "lte_prepare_run.com_query"
+        )
+        assert current_route is not None
+        if _normalize_csv(current_route) != _normalize_csv(expected_route):
+            self._execute_operation(
+                "write",
+                f"ROUTe:LTE:SIGN:SCENario:SCELl {expected_route}",
+                "lte_prepare_run.com_set",
+            )
+            verified = self._execute_operation(
+                "query", route_query, "lte_prepare_run.com_verify"
+            )
+            assert verified is not None
+            if _normalize_csv(verified) != _normalize_csv(expected_route):
+                raise RuntimeError(
+                    f"COM{port} 路由回读不一致：期望 {expected_route}，实际 {verified!r}"
+                )
+        self.current_com_port = port
+
+        self._set_and_verify_float(
+            f"CONFigure:LTE:SIGN:RFSettings:EATTenuation:INPut {loss:g}",
+            "CONFigure:LTE:SIGN:RFSettings:EATTenuation:INPut?",
+            loss,
+            "输入线损",
+            "lte_prepare_run.loss_input",
+        )
+        self._set_and_verify_float(
+            f"CONFigure:LTE:SIGN:RFSettings:EATTenuation:OUTPut {loss:g}",
+            "CONFigure:LTE:SIGN:RFSettings:EATTenuation:OUTPut?",
+            loss,
+            "输出线损",
+            "lte_prepare_run.loss_output",
+        )
+        self.current_cable_loss = loss
+
+        fixed_commands = (
+            (
+                "CONFigure:LTE:SIGN:UEReport:ENABle ON",
+                "lte_prepare_run.ue_report",
+            ),
+            (
+                "CONFigure:LTE:SIGN:UL:PUSCh:TPC:SET MAXP",
+                "lte_prepare_run.ul_tpc_maxp",
+            ),
+            (
+                "CONFigure:LTE:SIGN:UL:PMAX 23",
+                "lte_prepare_run.ul_pmax",
+            ),
+            (
+                "CONFigure:LTE:SIGN:CONNection:PCC:STYPe RMC",
+                "lte_prepare_run.connection_rmc",
+            ),
+            (
+                "CONFigure:LTE:SIGN:CELL:SECurity:AUTHenticat ON",
+                "lte_prepare_run.security_auth",
+            ),
+            (
+                "CONFigure:LTE:SIGN:CELL:SECurity:NAS ON",
+                "lte_prepare_run.security_nas",
+            ),
+            (
+                "CONFigure:LTE:SIGN:CELL:SECurity:AS ON",
+                "lte_prepare_run.security_as",
+            ),
+            (
+                "CONFigure:LTE:SIGN:CELL:SECurity:IALGorithm S3G",
+                "lte_prepare_run.security_ialgorithm",
+            ),
+        )
+        for command, stage in fixed_commands:
+            self._execute_operation("write", command, stage)
+
     def lte_prepare_cell(
         self,
         band: str,
@@ -175,6 +298,7 @@ class RealCMW500(InstrumentBase):
         bw: float | None = None,
         packet_count: int | None = None,
         cable_loss: float | None = None,
+        initial_rx_level: float | None = None,
     ) -> None:
         self.current_band = band
         self.current_channel = channel
@@ -186,6 +310,18 @@ class RealCMW500(InstrumentBase):
             self.current_packet_count = int(packet_count)
         if cable_loss is not None:
             self.current_cable_loss = float(cable_loss)
+        if initial_rx_level is not None:
+            value = float(initial_rx_level)
+            if not math.isfinite(value):
+                raise ValueError(f"初始 DL 电平必须是有限数值：{initial_rx_level}")
+            self.current_rx_level = value
+
+        duplex_mode = _duplex_mode_for_band(band)
+        self._execute_operation(
+            "write",
+            f"CONFigure:LTE:SIGN:PCC:DMODe {duplex_mode}",
+            "lte_prepare_cell.duplex_mode",
+        )
 
         template = self._require_lte_template()
         if not template.setup:
@@ -200,6 +336,7 @@ class RealCMW500(InstrumentBase):
                 bw=bw,
                 packet_count=packet_count,
                 cable_loss=cable_loss,
+                rx_level=self.current_rx_level,
             ),
             "lte_prepare_cell",
         )
@@ -319,6 +456,7 @@ class RealCMW500(InstrumentBase):
         bw: float | None = None,
         packet_count: int | None = None,
         cable_loss: float | None = None,
+        initial_rx_level: float | None = None,
     ) -> None:
         self.lte_prepare_cell(
             band,
@@ -328,6 +466,7 @@ class RealCMW500(InstrumentBase):
             bw=bw,
             packet_count=packet_count,
             cable_loss=cable_loss,
+            initial_rx_level=initial_rx_level,
         )
 
     def set_rx_level(self, level: float) -> None:
@@ -441,6 +580,23 @@ class RealCMW500(InstrumentBase):
     def abort_io(self) -> None:
         self._cancel_event.set()
         self.transport.abort_io()
+
+    def _set_and_verify_float(
+        self,
+        set_command: str,
+        query_command: str,
+        expected: float,
+        name: str,
+        stage: str,
+    ) -> None:
+        self._execute_operation("write", set_command, f"{stage}.set")
+        response = self._execute_operation("query", query_command, f"{stage}.verify")
+        assert response is not None
+        actual = _first_float(response)
+        if not math.isclose(actual, expected, rel_tol=0.0, abs_tol=0.05):
+            raise RuntimeError(
+                f"{name}回读不一致：期望 {expected:g}，实际 {response!r}"
+            )
 
     def _build_context(
         self,
