@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QApplication
 
 from app_info import APP_ID, APP_NAME, APP_VERSION, ORGANIZATION_NAME
 from core.lte_v1_workflow import apply_lte_v1_workflow
+from core.v1_calibration_policy import apply_optional_calibration_policy
 from ui.main_window import MainWindow
 
 
@@ -33,6 +34,7 @@ def main() -> int:
     # worker is created. The hook is idempotent and keeps the change isolated
     # from the already-validated generic worker state machine.
     apply_lte_v1_workflow()
+    apply_optional_calibration_policy()
 
     window = MainWindow()
     window.show()
