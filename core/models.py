@@ -31,6 +31,9 @@ class LteTestConfig:
     test_mode: str
     data: list[dict[str, str | int | float]] = field(default_factory=list)
     run_id: str = ""
+    # LTE Signaling RF route selected by the UI. Kept in the run snapshot for
+    # reproducibility; COM1..COM4 map to the validated SCELL routes.
+    com_port: int = 1
 
 
 @dataclass
