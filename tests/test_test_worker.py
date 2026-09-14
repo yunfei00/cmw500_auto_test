@@ -200,7 +200,7 @@ def test_invalid_bler_is_retried_and_each_attempt_is_retained() -> None:
     assert worker.current_state is WorkerState.COMPLETED
     assert [row.result for row in rows[:2]] == ["ERROR", "PASS"]
     assert rows[0].metric_value is None
-    assert "finite" in rows[0].error_message
+    assert "有限数值" in rows[0].error_message
     assert rows[0].status == "RETRY_PENDING"
     assert rows[1].attempt == 2
 
