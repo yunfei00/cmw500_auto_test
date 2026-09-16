@@ -8,6 +8,7 @@ from core.test_worker import TestWorker
 from ui.left_panel import LeftPanel
 
 FAST_PACKET_DEFAULT=100; START_LEVEL_DEFAULT=-85.0; MAX_STEP_DEFAULT=0.3; MIN_STEP_DEFAULT=0.1; BLER_THRESHOLD_DEFAULT=5.0
+FAST_CONFIRM_TRIGGER=1.2; CONFIRM_DIRECT_MIN=4.8; CONFIRM_DIRECT_MAX=5.0
 RECONNECT_BOOST_DB=5.0; RECONNECT_ATTEMPTS=3; ATTACH_ATTEMPTS=3; REFERENCE_METRIC_ATTEMPTS=3
 FULL_CELL_BW_POWER_QUERY="SENSe:LTE:SIGN:DL:PCC:FCPOWer?"
 RSRP_QUERY="SENSe:LTE:SIGN:UEReport:PCC:RSRP?"
@@ -106,15 +107,31 @@ def _measure_with_packets(worker,item,level,phase,current,total,packet_count):
         if power is not None: worker.log_signal.emit("INFO",f"{phase} {item.band}/{item.channel} Full Cell BW Power={power:g} dBm")
         return passed
     finally: worker.config.packet_count=op; worker.config.retry_count=oretry
+def _last_bler(worker):
+    result=getattr(worker,"_last_built_test_result",None)
+    if result is None or str(getattr(result,"metric_type","")).upper()!="BLER" or getattr(result,"metric_value",None) is None: return None
+    return float(result.metric_value)
 def _scan_item(self,item,current,total):
-    level=float(self.config.start_level); fast=int(getattr(self.config,"fast_packet_count",FAST_PACKET_DEFAULT)); formal=int(self.config.packet_count); max_step=float(self.config.max_step); min_step=float(self.config.min_step); self.log_signal.emit("INFO",f"LTE 快速灵敏度扫描：起点={level:g} dBm，快速={fast}包/{max_step:g}dB，确认={formal}包，细扫={min_step:g}dB")
+    level=float(self.config.start_level); fast=int(getattr(self.config,"fast_packet_count",FAST_PACKET_DEFAULT)); formal=int(self.config.packet_count); max_step=float(self.config.max_step); min_step=float(self.config.min_step); self.log_signal.emit("INFO",f"LTE 快速灵敏度扫描：起点={level:g} dBm，快速={fast}包/{max_step:g}dB，BLER>{FAST_CONFIRM_TRIGGER:g}%触发确认，确认={formal}包，细扫={min_step:g}dB")
     while True:
         level,recovered=_ensure_connected_for_probe(self,item,level)
         if recovered and level>float(self.config.start_level): self.log_signal.emit("WARNING",f"恢复电平 {level:g} dBm 高于初始电平 {self.config.start_level:g} dBm")
-        if _measure_with_packets(self,item,level,"FAST",current,total,fast): level=round(level-max_step,10); continue
+        _measure_with_packets(self,item,level,"FAST",current,total,fast); fast_bler=_last_bler(self)
+        if fast_bler is None: raise RuntimeError("FAST BLER 结果为空")
+        if fast_bler<=FAST_CONFIRM_TRIGGER: level=round(level-max_step,10); continue
+        self.log_signal.emit("INFO",f"FAST BLER={fast_bler:.2f}% > {FAST_CONFIRM_TRIGGER:g}%，当前点使用 {formal} 包二次确认")
         confirm,recovered=_ensure_connected_for_probe(self,item,level)
         if recovered: level=confirm; continue
-        if _measure_with_packets(self,item,level,"CONFIRM",current,total,formal): level=round(level-max_step,10); continue
+        _measure_with_packets(self,item,level,"CONFIRM",current,total,formal); confirm_bler=_last_bler(self)
+        if confirm_bler is None: raise RuntimeError("CONFIRM BLER 结果为空")
+        if CONFIRM_DIRECT_MIN<=confirm_bler<=CONFIRM_DIRECT_MAX:
+            self.log_signal.emit("INFO",f"CONFIRM BLER={confirm_bler:.2f}% 位于 {CONFIRM_DIRECT_MIN:g}%~{CONFIRM_DIRECT_MAX:g}%，直接确定 Sensitivity={level:g} dBm，不再向上回溯")
+            # Treat this confirmed boundary point as the terminal result so summary BLER/RSRP/RSRQ use it.
+            result=getattr(self,"_last_built_test_result",None)
+            if result is not None:
+                result.scan_phase="FINE"; result.result="PASS"; result.status="PASS"; self.row_signal.emit(result)
+            _collect_reference_metrics(self,item,level); return
+        if confirm_bler<float(self.config.bler_threshold): level=round(level-max_step,10); continue
         fail_level=level; fine=round(fail_level+min_step,10)
         while True:
             fine,recovered=_ensure_connected_for_probe(self,item,fine)
