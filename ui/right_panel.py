@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
@@ -33,10 +34,18 @@ class RightPanel(QWidget):
         layout.addLayout(button_layout)
         layout.addWidget(self.log_edit, 1)
 
+    @staticmethod
+    def _operator_message(message: str) -> str:
+        """Remove duplicate DUT-level text; CMW RS EPRE is the operator RF level."""
+        message = re.sub(r"\s*DUT=[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*dBm,?\s*", " ", message)
+        message = re.sub(r"\s*DUT 电平 [+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*dBm\s*", " ", message)
+        return " ".join(message.split())
+
     def append_log(self, level: str, message: str) -> None:
         # Operator-facing logs use local wall-clock time only. Keep milliseconds
         # for SCPI/test timing analysis, but omit ISO T and timezone suffix.
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        message = self._operator_message(message)
         line = f"[{timestamp}][{level}] {message}"
         self.log_edit.appendPlainText(line)
         self.log_edit.verticalScrollBar().setValue(self.log_edit.verticalScrollBar().maximum())
