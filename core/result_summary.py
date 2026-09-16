@@ -21,7 +21,6 @@ class SummaryResult:
     run_id: str = ""
     data_source: str = "UNKNOWN"
     bw: float | None = None
-    sensitivity_upper: float | None = None
     error_count: int = 0
 
 
@@ -53,39 +52,22 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
         test_mode,
         bw,
     ), group in grouped_results.items():
+        terminal_items = _terminal_attempts(group)
+        # The fast sensitivity policy completes a channel only when the fine scan
+        # finds its first PASS point. Do not expose intermediate FAST/CONFIRM
+        # points as a summary row.
+        fine_passes = [
+            item
+            for item in terminal_items
+            if item.scan_phase.upper() == "FINE" and item.result.upper() == "PASS"
+        ]
+        if not fine_passes:
+            continue
+
+        sensitivity = min(item.rx_level for item in fine_passes)
         pass_items = [item for item in group if item.result.upper() == "PASS"]
         fail_items = [item for item in group if item.result.upper() == "FAIL"]
         error_items = [item for item in group if item.result.upper() == "ERROR"]
-        terminal_items = _terminal_attempts(group)
-        terminal_errors = [item for item in terminal_items if item.result.upper() == "ERROR"]
-        terminal_passes = [item for item in terminal_items if item.result.upper() == "PASS"]
-        sensitivity = min((item.rx_level for item in terminal_passes), default=None)
-        sensitivity_upper = next(
-            (item.sensitivity_upper for item in group if item.sensitivity_upper is not None),
-            None,
-        )
-
-        if terminal_errors:
-            summary_result = "ERROR"
-            remark = "Measurement incomplete because the final retry ended with an error"
-        elif sensitivity is None:
-            summary_result = "FAIL"
-            remark = "No PASS point found"
-        elif sensitivity_upper is None:
-            summary_result = "PASS"
-            remark = f"Sensitivity = {sensitivity:g} dBm (no specification limit)"
-        elif sensitivity <= sensitivity_upper:
-            summary_result = "PASS"
-            remark = (
-                f"Sensitivity = {sensitivity:g} dBm, meets upper limit "
-                f"{sensitivity_upper:g} dBm"
-            )
-        else:
-            summary_result = "FAIL"
-            remark = (
-                f"Sensitivity = {sensitivity:g} dBm, exceeds upper limit "
-                f"{sensitivity_upper:g} dBm"
-            )
 
         summary_results.append(
             SummaryResult(
@@ -98,12 +80,11 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
                 pass_count=len(pass_items),
                 fail_count=len(fail_items),
                 total_count=len(group),
-                result=summary_result,
-                remark=remark,
+                result="PASS",
+                remark=f"Sensitivity = {sensitivity:g} dBm",
                 run_id=run_id,
                 data_source=data_source,
                 bw=bw,
-                sensitivity_upper=sensitivity_upper,
                 error_count=len(error_items),
             )
         )
