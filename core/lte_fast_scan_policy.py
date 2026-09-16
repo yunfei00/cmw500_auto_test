@@ -6,7 +6,8 @@ Keeps the V1 change isolated while the existing worker/UI remain stable:
 - fast probe with a small packet count;
 - confirm the first threshold crossing with the configured formal packet count;
 - fine-search upward with the minimum step;
-- verify UE connection before every probe and recover at +5 dB when detached.
+- verify UE connection before every probe and recover at +5 dB when detached;
+- keep descending until a real BLER boundary is found (no operator stop level).
 """
 
 import re
@@ -37,6 +38,16 @@ def _create_lte_instrument_group(self: LeftPanel):
     group = _original_create_lte_instrument_group(self)
     self.sensitivity_upper_spin.setValue(START_LEVEL_DEFAULT)
     self.start_level_spin.setValue(START_LEVEL_DEFAULT)
+
+    # Keep the legacy field only so the current LteTestConfig constructor stays
+    # backward compatible. It is hidden from operators and ignored by scanning.
+    self.stop_level_spin.setVisible(False)
+    form = group.layout()
+    if hasattr(form, "labelForField"):
+        stop_label = form.labelForField(self.stop_level_spin)
+        if stop_label is not None:
+            stop_label.setVisible(False)
+
     self.packet_count_spin.setValue(1000)
     self.max_step_spin.setValue(MAX_STEP_DEFAULT)
     self.min_step_spin.setValue(MIN_STEP_DEFAULT)
@@ -45,7 +56,6 @@ def _create_lte_instrument_group(self: LeftPanel):
     self.fast_packet_count_spin = QSpinBox()
     self.fast_packet_count_spin.setRange(1, 999999)
     self.fast_packet_count_spin.setValue(FAST_PACKET_DEFAULT)
-    form = group.layout()
     if hasattr(form, "insertRow"):
         row = max(0, form.rowCount() - 6)
         form.insertRow(row, "快速测试包个数：", self.fast_packet_count_spin)
@@ -136,12 +146,7 @@ def _query_full_cell_bw_power(worker: TestWorker) -> float | None:
             raise ValueError(f"无法解析仪表返回值：{response!r}")
         return float(match.group(0))
     except Exception as exc:
-        # FC Power is an operator readback. A readback failure must be visible,
-        # but it must not turn an otherwise valid BLER point into a test failure.
-        worker.log_signal.emit(
-            "WARNING",
-            f"Full Cell BW Power 查询失败：{exc}",
-        )
+        worker.log_signal.emit("WARNING", f"Full Cell BW Power 查询失败：{exc}")
         return None
 
 
@@ -178,7 +183,6 @@ def _measure_with_packets(
 
 def _scan_item(self: TestWorker, item: Any, current: int, total: int) -> None:
     level = float(self.config.start_level)
-    stop_level = float(self.config.stop_level)
     fast_packets = int(getattr(self.config, "fast_packet_count", FAST_PACKET_DEFAULT))
     formal_packets = int(self.config.packet_count)
     max_step = float(self.config.max_step)
@@ -191,7 +195,8 @@ def _scan_item(self: TestWorker, item: Any, current: int, total: int) -> None:
     )
 
     while True:
-        # FAST: descend from the current connected level using the maximum step.
+        # No arbitrary stop level: descend until BLER finds the boundary. UE
+        # detach and instrument range errors remain explicit recovery/error paths.
         level, recovered = _ensure_connected_for_probe(self, item, level)
         if recovered and level > float(self.config.start_level):
             self.log_signal.emit(
@@ -203,12 +208,9 @@ def _scan_item(self: TestWorker, item: Any, current: int, total: int) -> None:
             self, item, level, "FAST", current, total, fast_packets
         )
         if passed:
-            if level <= stop_level or self._same_level(level, stop_level):
-                return
-            level = max(stop_level, round(level - max_step, 10))
+            level = round(level - max_step, 10)
             continue
 
-        # CONFIRM: repeat the first fast FAIL with the formal packet count.
         confirm_level, recovered = _ensure_connected_for_probe(self, item, level)
         if recovered:
             level = confirm_level
@@ -217,9 +219,7 @@ def _scan_item(self: TestWorker, item: Any, current: int, total: int) -> None:
             self, item, level, "CONFIRM", current, total, formal_packets
         )
         if confirmed_pass:
-            if level <= stop_level or self._same_level(level, stop_level):
-                return
-            level = max(stop_level, round(level - max_step, 10))
+            level = round(level - max_step, 10)
             continue
 
         confirmed_fail_level = level
@@ -228,13 +228,10 @@ def _scan_item(self: TestWorker, item: Any, current: int, total: int) -> None:
             f"确认 FAIL：{confirmed_fail_level:g} dBm，开始 {min_step:g} dB 向上细扫",
         )
 
-        # FINE: move upward from confirmed FAIL until the first formal PASS.
         fine_level = round(confirmed_fail_level + min_step, 10)
         while True:
             fine_level, recovered = _ensure_connected_for_probe(self, item, fine_level)
             if recovered:
-                # A disconnect is not a BLER decision. Restart the normal fast ->
-                # confirm -> fine rule from the recovered connected level.
                 level = fine_level
                 self.log_signal.emit(
                     "INFO",
