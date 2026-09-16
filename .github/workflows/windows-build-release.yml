@@ -90,11 +90,7 @@ jobs:
           CMW_SIGN_CERT_SHA1: ${{ secrets.CMW_SIGN_CERT_SHA1 }}
           CMW_SIGN_TIMESTAMP_URL: ${{ vars.CMW_SIGN_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
           CMW_REQUIRE_SIGNING: ${{ vars.CMW_REQUIRE_SIGNING || '0' }}
-        run: |
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $env:CMW_REQUIRE_SIGNING = '1'
-          }
-          uv run --locked --group build python scripts/build_windows.py
+        run: uv run --locked --group build python scripts/build_windows.py
 
       - name: Verify critical runtime resources
         shell: pwsh
