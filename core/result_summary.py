@@ -25,6 +25,7 @@ class SummaryResult:
     rsrp: float | None = None
     rsrq: float | None = None
     reference_metrics_status: str = ""
+    final_bler: float | None = None
 
 
 def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
@@ -68,6 +69,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
         if fine_passes:
             final_item = min(fine_passes, key=lambda item: item.rx_level)
             sensitivity = final_item.rx_level
+            final_bler = final_item.metric_value if final_item.metric_type.upper() == "BLER" else None
             ref_status = getattr(final_item, "reference_metrics_status", "")
             remark = f"Sensitivity = {sensitivity:g} dBm"
             if ref_status == "UNAVAILABLE":
@@ -76,9 +78,6 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
             rsrp = getattr(final_item, "rsrp", None)
             rsrq = getattr(final_item, "rsrq", None)
         else:
-            # Intermediate FAST/CONFIRM points must not create a summary row.
-            # A CHANNEL/ERROR marker means this channel has exhausted its own
-            # retries and was deliberately skipped so the remaining channels can run.
             failed_markers = [
                 item for item in terminal_items
                 if item.scan_phase.upper() == "CHANNEL"
@@ -88,6 +87,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
                 continue
             final_item = failed_markers[-1]
             sensitivity = None
+            final_bler = None
             ref_status = "UNAVAILABLE"
             message = getattr(final_item, "error_message", "").strip()
             remark = "Channel failed; skipped"
@@ -117,6 +117,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
                 rsrp=rsrp,
                 rsrq=rsrq,
                 reference_metrics_status=ref_status,
+                final_bler=final_bler,
             )
         )
 
