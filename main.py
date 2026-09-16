@@ -6,11 +6,14 @@ from PySide6.QtWidgets import QApplication
 from app_info import APP_ID, APP_NAME, APP_VERSION, ORGANIZATION_NAME
 from core.lte_fast_scan_policy import apply_lte_fast_scan_policy
 from core.lte_channel_resilience import apply_lte_channel_resilience
+from core.lte_channel_config_persistence import apply_lte_channel_config_persistence
 
 # Apply the LTE V1 scan behavior before MainWindow/LeftPanel instances are created.
 apply_lte_fast_scan_policy()
 # A single channel failure is recorded and skipped; RF-safety failures still abort.
 apply_lte_channel_resilience()
+# Restore the last successfully loaded LTE channel configuration on next startup.
+apply_lte_channel_config_persistence()
 
 from ui.main_window import MainWindow  # noqa: E402
 
