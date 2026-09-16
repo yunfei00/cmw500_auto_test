@@ -7,6 +7,7 @@ from app_info import APP_ID, APP_NAME, APP_VERSION, ORGANIZATION_NAME
 from core.lte_fast_scan_policy import apply_lte_fast_scan_policy
 from core.lte_channel_resilience import apply_lte_channel_resilience
 from core.lte_channel_config_persistence import apply_lte_channel_config_persistence
+from core.lte_start_level_policy import apply_lte_start_level_policy
 
 # Apply the LTE V1 scan behavior before MainWindow/LeftPanel instances are created.
 apply_lte_fast_scan_policy()
@@ -14,6 +15,8 @@ apply_lte_fast_scan_policy()
 apply_lte_channel_resilience()
 # Restore the last successfully loaded LTE channel configuration on next startup.
 apply_lte_channel_config_persistence()
+# The fast scan no longer uses the hidden legacy stop level.
+apply_lte_start_level_policy()
 
 from ui.main_window import MainWindow  # noqa: E402
 
