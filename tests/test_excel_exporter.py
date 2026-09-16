@@ -51,7 +51,6 @@ def test_simulation_export_is_traceable_and_visibly_marked(tmp_path: Path) -> No
         run_id="run-sim-001",
         data_source="SIMULATION",
         bw=20.0,
-        sensitivity_upper=-85.0,
     )
     output_path = tmp_path / "nested" / "result.xlsx"
     metadata = {
@@ -85,7 +84,8 @@ def test_simulation_export_is_traceable_and_visibly_marked(tmp_path: Path) -> No
         assert [cell.value for cell in workbook["RawResults"][2]] == RAW_HEADERS
         assert workbook["RawResults"]["A3"].value == "run-sim-001"
         assert workbook["RawResults"]["C3"].value == "SIMULATION"
-        assert workbook["RawResults"]["X3"].value.startswith("'=WEBSERVICE")
+        error_column = RAW_HEADERS.index("错误信息")
+        assert workbook["RawResults"][3][error_column].value.startswith("'=WEBSERVICE")
         assert [cell.value for cell in workbook["Summary"][2]] == SUMMARY_HEADERS
         assert workbook["Summary"]["A3"].value == "run-sim-001"
         metadata_values = {
