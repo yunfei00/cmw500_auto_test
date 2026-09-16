@@ -22,6 +22,7 @@ RELEASE_VERSION_PATTERN = re.compile(
 DEVELOPMENT_RUNTIME_VERSION_PATTERN = re.compile(
     r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-dev$"
 )
+REQUIRE_SIGNING_ENV = "CMW_REQUIRE_SIGNING"
 REQUIRED_ARCHIVE_FILES = (
     f"{APP_NAME}/{APP_NAME}.exe",
     f"{APP_NAME}/README.md",
@@ -38,6 +39,10 @@ REQUIRED_ARCHIVE_FILES = (
 
 def log(message: str) -> None:
     print(f"[package_release] {message}", flush=True)
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def resolve_version(cli_version: str | None) -> str:
@@ -70,8 +75,10 @@ def create_zip(version: str) -> Path:
     filename_version = validate_version(version)
     verify_runtime_version(APP_DIST_DIR / "VERSION", filename_version)
     verify_build_info(APP_DIST_DIR / "BUILD_INFO.json", filename_version)
-    if filename_version != DEVELOPMENT_VERSION:
+    if filename_version != DEVELOPMENT_VERSION and _env_flag(REQUIRE_SIGNING_ENV):
         verify_authenticode_signature(APP_DIST_DIR / f"{APP_NAME}.exe")
+    elif filename_version != DEVELOPMENT_VERSION:
+        log("Authenticode verification skipped because signing is optional for this release.")
 
     RELEASE_DIR.mkdir(parents=True, exist_ok=True)
     zip_path = RELEASE_DIR / f"{APP_NAME}-{filename_version}-windows-x64.zip"
