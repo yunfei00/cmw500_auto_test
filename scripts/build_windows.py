@@ -308,17 +308,15 @@ def _resolve_executable(value: str) -> str | None:
 
 
 def sign_windows_executable() -> bool:
-    """Sign the release executable when an external certificate is configured.
+    """Sign the executable when signing credentials are configured.
 
-    The certificate must already be available in the Windows certificate store.
-    No certificate material or password is stored in this repository.
+    Signing is optional by default, including release-tag builds. Set
+    CMW_REQUIRE_SIGNING=1 to make Authenticode signing mandatory.
     """
 
     signtool_value = os.environ.get(SIGNTOOL_PATH_ENV, "").strip()
     certificate_sha1 = os.environ.get(SIGN_CERT_SHA1_ENV, "").strip()
-    require_signing = _env_flag(REQUIRE_SIGNING_ENV) or bool(
-        RELEASE_VERSION_PATTERN.fullmatch(resolve_runtime_version())
-    )
+    require_signing = _env_flag(REQUIRE_SIGNING_ENV)
 
     if not signtool_value and not certificate_sha1:
         if require_signing:
