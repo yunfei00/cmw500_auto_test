@@ -31,10 +31,7 @@ class LteTestConfig:
     test_mode: str
     data: list[dict[str, str | int | float]] = field(default_factory=list)
     run_id: str = ""
-    # LTE Signaling RF route selected by the UI. Kept in the run snapshot for
-    # reproducibility; COM1..COM4 map to the validated SCELL routes.
     com_port: int = 1
-    # LTE PUSCH power-control values configured before Cell ON.
     pusch_open_loop_nom_power: float = 23.0
     pusch_closed_loop_target_power: float = 0.0
 
@@ -79,6 +76,11 @@ class TestResult:
     attempt: int = 1
     scan_phase: str = "COARSE"
     error_message: str = ""
+    # Optional UE measurement-report values sampled at the final sensitivity point.
+    # They are reference-only and never affect the sensitivity verdict.
+    rsrp: float | None = None
+    rsrq: float | None = None
+    reference_metrics_status: str = ""
 
 
 @dataclass
