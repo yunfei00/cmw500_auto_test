@@ -9,6 +9,7 @@ Keeps the V1 change isolated while the existing worker/UI remain stable:
 - verify UE connection before every probe and recover at +5 dB when detached.
 """
 
+import re
 from typing import Any
 
 from PySide6.QtWidgets import QSpinBox
@@ -24,6 +25,7 @@ MIN_STEP_DEFAULT = 0.1
 BLER_THRESHOLD_DEFAULT = 5.0
 RECONNECT_BOOST_DB = 5.0
 RECONNECT_ATTEMPTS = 3
+FULL_CELL_BW_POWER_QUERY = "SENSe:LTE:SIGN:DL:PCC:FCPOWer?"
 
 
 _original_create_lte_instrument_group = LeftPanel._create_lte_instrument_group
@@ -119,6 +121,30 @@ def _ensure_connected_for_probe(
     )
 
 
+def _query_full_cell_bw_power(worker: TestWorker) -> float | None:
+    """Read the CMW500 Full Cell BW Power for the current LTE DL level."""
+
+    if bool(getattr(worker.instrument, "is_simulation", False)):
+        return None
+    query = getattr(worker.instrument, "query", None)
+    if not callable(query):
+        return None
+    try:
+        response = str(query(FULL_CELL_BW_POWER_QUERY)).strip()
+        match = re.search(r"[-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?", response)
+        if not match:
+            raise ValueError(f"无法解析仪表返回值：{response!r}")
+        return float(match.group(0))
+    except Exception as exc:
+        # FC Power is an operator readback. A readback failure must be visible,
+        # but it must not turn an otherwise valid BLER point into a test failure.
+        worker.log_signal.emit(
+            "WARNING",
+            f"Full Cell BW Power 查询失败：{exc}",
+        )
+        return None
+
+
 def _measure_with_packets(
     worker: TestWorker,
     item: Any,
@@ -135,7 +161,16 @@ def _measure_with_packets(
     worker.config.packet_count = int(packet_count)
     worker.config.retry_count = 0
     try:
-        return _original_measure_level(worker, item, level, phase, current, total)
+        passed = _original_measure_level(worker, item, level, phase, current, total)
+        full_cell_bw_power = _query_full_cell_bw_power(worker)
+        if full_cell_bw_power is not None:
+            instrument_level = worker._instrument_level_for_dut(item, level)
+            worker.log_signal.emit(
+                "INFO",
+                f"{phase} {item.band}/{item.channel} CMW RS EPRE={instrument_level:g} dBm, "
+                f"Full Cell BW Power={full_cell_bw_power:g} dBm",
+            )
+        return passed
     finally:
         worker.config.packet_count = original_packets
         worker.config.retry_count = original_retries
