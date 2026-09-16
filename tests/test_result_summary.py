@@ -12,9 +12,12 @@ def result(
     level: float,
     verdict: str,
     attempt: int = 1,
-    phase: str = "COARSE",
-    upper: float = -85.0,
+    phase: str = "FINE",
+    metric_value: float | None = None,
+    error_message: str = "",
 ) -> Result:
+    if metric_value is None and verdict not in {"ERROR", "FAILED"}:
+        metric_value = 1.0 if verdict == "PASS" else 20.0
     return Result(
         index=1,
         mode="LTE",
@@ -24,48 +27,55 @@ def result(
         test_mode="单主",
         rx_level=level,
         metric_type="BLER",
-        metric_value=None if verdict == "ERROR" else (1.0 if verdict == "PASS" else 20.0),
+        metric_value=metric_value,
         result=verdict,
-        status="COMPLETED" if verdict != "ERROR" else "ERROR",
+        status="COMPLETED" if verdict not in {"ERROR", "FAILED"} else "FAILED",
         run_id=run_id,
         data_source="INSTRUMENT",
         bw=20.0,
-        sensitivity_upper=upper,
         attempt=attempt,
         scan_phase=phase,
+        error_message=error_message,
     )
 
 
-def test_summary_uses_terminal_retry_and_sensitivity_specification() -> None:
+def test_summary_uses_terminal_retry_and_reports_final_bler() -> None:
     rows = [
-        result(run_id="r1", level=-80.0, verdict="PASS"),
+        result(run_id="r1", level=-80.0, verdict="PASS", phase="FAST"),
         result(run_id="r1", level=-86.0, verdict="FAIL", attempt=1, phase="FINE"),
-        result(run_id="r1", level=-86.0, verdict="PASS", attempt=2, phase="FINE"),
+        result(run_id="r1", level=-86.0, verdict="PASS", attempt=2, phase="FINE", metric_value=4.9),
         result(run_id="r1", level=-87.0, verdict="FAIL", attempt=2, phase="FINE"),
     ]
 
     summary = build_lte_summary(rows)[0]
 
     assert summary.sensitivity == -86.0
-    assert summary.sensitivity_upper == -85.0
+    assert summary.final_bler == 4.9
     assert summary.result == "PASS"
     assert summary.pass_count == 2
     assert summary.fail_count == 2
 
 
-def test_summary_fails_when_sensitivity_exceeds_upper_limit() -> None:
-    rows = [result(run_id="r1", level=-86.0, verdict="PASS", upper=-87.0)]
+def test_summary_no_longer_applies_legacy_sensitivity_upper_limit() -> None:
+    rows = [result(run_id="r1", level=-120.0, verdict="PASS", phase="FINE", metric_value=4.8)]
 
     summary = build_lte_summary(rows)[0]
 
-    assert summary.result == "FAIL"
-    assert "exceeds upper limit" in summary.remark
+    assert summary.sensitivity == -120.0
+    assert summary.final_bler == 4.8
+    assert summary.result == "PASS"
 
 
-def test_summary_keeps_runs_isolated_and_marks_terminal_error() -> None:
+def test_summary_keeps_runs_isolated_and_marks_channel_failure() -> None:
     rows = [
-        result(run_id="r1", level=-86.0, verdict="PASS"),
-        result(run_id="r2", level=-86.0, verdict="ERROR"),
+        result(run_id="r1", level=-86.0, verdict="PASS", phase="FINE"),
+        result(
+            run_id="r2",
+            level=-85.0,
+            verdict="FAILED",
+            phase="CHANNEL",
+            error_message="UE Attach timeout",
+        ),
     ]
 
     summaries = build_lte_summary(rows)
@@ -73,8 +83,11 @@ def test_summary_keeps_runs_isolated_and_marks_terminal_error() -> None:
     assert len(summaries) == 2
     by_run = {item.run_id: item for item in summaries}
     assert by_run["r1"].result == "PASS"
-    assert by_run["r2"].result == "ERROR"
+    assert by_run["r2"].result == "FAILED"
+    assert by_run["r2"].sensitivity is None
+    assert by_run["r2"].final_bler is None
     assert by_run["r2"].error_count == 1
+    assert "UE Attach timeout" in by_run["r2"].remark
 
 
 def test_bler_judge_rejects_non_finite_and_out_of_range_values() -> None:
