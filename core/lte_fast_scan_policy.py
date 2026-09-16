@@ -33,8 +33,6 @@ _original_measure_level = TestWorker._measure_level
 
 def _create_lte_instrument_group(self: LeftPanel):
     group = _original_create_lte_instrument_group(self)
-
-    # Defaults are the values already proven useful for the fast LTE sensitivity run.
     self.sensitivity_upper_spin.setValue(START_LEVEL_DEFAULT)
     self.start_level_spin.setValue(START_LEVEL_DEFAULT)
     self.packet_count_spin.setValue(1000)
@@ -47,7 +45,6 @@ def _create_lte_instrument_group(self: LeftPanel):
     self.fast_packet_count_spin.setValue(FAST_PACKET_DEFAULT)
     form = group.layout()
     if hasattr(form, "insertRow"):
-        # Put fast packets directly before the formal packet count.
         row = max(0, form.rowCount() - 6)
         form.insertRow(row, "快速测试包个数：", self.fast_packet_count_spin)
     else:
@@ -82,11 +79,7 @@ def _ensure_connected_for_probe(
     item: Any,
     requested_level: float,
 ) -> tuple[float, bool]:
-    """Set the requested point, verify attach, and recover upward if detached.
-
-    Returns (level_to_measure, recovered). A detached point is never classified as
-    BLER FAIL. After recovery the scan restarts from the recovered level.
-    """
+    """Set requested point, verify attach, and recover upward if detached."""
 
     level = float(requested_level)
     instrument_level = worker._instrument_level_for_dut(item, level)
@@ -112,8 +105,7 @@ def _ensure_connected_for_probe(
         worker._raise_if_stopped()
         worker._emit_instrument_warning()
         worker.log_signal.emit(
-            "INFO",
-            f"UE 重连 {attempt}/{attempts}：DUT={recovery_level:g} dBm",
+            "INFO", f"UE 重连 {attempt}/{attempts}：DUT={recovery_level:g} dBm"
         )
         if _wait_connected(worker, 10.0):
             worker.log_signal.emit(
@@ -136,13 +128,11 @@ def _measure_with_packets(
     total: int,
     packet_count: int,
 ) -> bool:
-    """Use the existing measurement/report path with a phase-specific packet count."""
+    """Use existing measurement/report path with a phase-specific packet count."""
 
     original_packets = worker.config.packet_count
     original_retries = worker.config.retry_count
     worker.config.packet_count = int(packet_count)
-    # A threshold FAIL is a scan decision, not a generic retry. The dedicated
-    # CONFIRM phase below performs the required second measurement.
     worker.config.retry_count = 0
     try:
         return _original_measure_level(worker, item, level, phase, current, total)
@@ -165,16 +155,14 @@ def _scan_item(self: TestWorker, item: Any, current: int, total: int) -> None:
         f"确认={formal_packets}包，细扫={min_step:g}dB，门限={self.config.bler_threshold:g}%",
     )
 
-    # FAST: descend from the strong starting level using the maximum step.
     while True:
+        # FAST: descend from the current connected level using the maximum step.
         level, recovered = _ensure_connected_for_probe(self, item, level)
-        if recovered:
-            # Recovery is a new safe starting point; never count the detached point as FAIL.
-            if level > float(self.config.start_level):
-                self.log_signal.emit(
-                    "WARNING",
-                    f"恢复电平 {level:g} dBm 高于初始电平 {self.config.start_level:g} dBm",
-                )
+        if recovered and level > float(self.config.start_level):
+            self.log_signal.emit(
+                "WARNING",
+                f"恢复电平 {level:g} dBm 高于初始电平 {self.config.start_level:g} dBm",
+            )
 
         passed = _measure_with_packets(
             self, item, level, "FAST", current, total, fast_packets
@@ -185,7 +173,7 @@ def _scan_item(self: TestWorker, item: Any, current: int, total: int) -> None:
             level = max(stop_level, round(level - max_step, 10))
             continue
 
-        # CONFIRM: the first fast FAIL must be repeated with the formal packet count.
+        # CONFIRM: repeat the first fast FAIL with the formal packet count.
         confirm_level, recovered = _ensure_connected_for_probe(self, item, level)
         if recovered:
             level = confirm_level
@@ -205,13 +193,19 @@ def _scan_item(self: TestWorker, item: Any, current: int, total: int) -> None:
             f"确认 FAIL：{confirmed_fail_level:g} dBm，开始 {min_step:g} dB 向上细扫",
         )
 
-        # FINE: move upward from the confirmed FAIL until the first formal PASS.
+        # FINE: move upward from confirmed FAIL until the first formal PASS.
         fine_level = round(confirmed_fail_level + min_step, 10)
         while True:
             fine_level, recovered = _ensure_connected_for_probe(self, item, fine_level)
             if recovered:
-                # Re-enter fine search from the recovered connected point.
-                pass
+                # A disconnect is not a BLER decision. Restart the normal fast ->
+                # confirm -> fine rule from the recovered connected level.
+                level = fine_level
+                self.log_signal.emit(
+                    "INFO",
+                    f"细扫期间发生掉线，已恢复到 {level:g} dBm，重新进入快速搜索",
+                )
+                break
             if _measure_with_packets(
                 self, item, fine_level, "FINE", current, total, formal_packets
             ):
