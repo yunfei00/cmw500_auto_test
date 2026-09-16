@@ -20,7 +20,7 @@ LogCallback = Callable[[str, str], None]
 
 class CenterPanel(QWidget):
     HEADERS = ["Run ID", "序号", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "仪表下发电平(dBm)", "总线损(dB)", "指标类型", "指标值", "尝试次数", "扫描阶段", "结果", "状态", "错误信息", "时间"]
-    SUMMARY_HEADERS = ["Run ID", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "灵敏度(dBm)", "规格上限(dBm)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
+    SUMMARY_HEADERS = ["Run ID", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "灵敏度(dBm)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -73,8 +73,6 @@ class CenterPanel(QWidget):
             elif header=="结果" and row_result=="FAIL": item.setForeground(Qt.GlobalColor.red)
             self.table.setItem(row,column,item)
         if self.auto_scroll_checkbox.isChecked(): self.table.scrollToBottom()
-        # Rebuild the compact summary as each measurement arrives so the operator
-        # can watch the current channel converge without opening the raw-data tab.
         self.summary_results=build_lte_summary(self.test_results)
         self.update_summary_table(self.summary_results)
     def update_summary(self,data):
@@ -125,7 +123,7 @@ class CenterPanel(QWidget):
             return {"Run ID":getattr(result,"run_id",""),"序号":result.index,"数据来源":getattr(result,"data_source",""),"制式":result.mode,"Band":result.band,"信道":result.channel,"频点类型":result.channel_type,"测试模式":result.test_mode,"带宽(MHz)":self._format_number(getattr(result,"bw",None)),"仪表下发电平(dBm)":self._format_number(getattr(result,"instrument_level",None)),"总线损(dB)":self._format_number(getattr(result,"total_loss",None)),"指标类型":result.metric_type,"指标值":self._format_number(result.metric_value,decimals=2),"尝试次数":getattr(result,"attempt",1),"扫描阶段":getattr(result,"scan_phase",""),"结果":result.result,"状态":result.status,"错误信息":getattr(result,"error_message",""),"时间":result.timestamp}
         return dict(result)
     def _summary_result_to_row_data(self,result):
-        return {"Run ID":getattr(result,"run_id",""),"数据来源":getattr(result,"data_source",""),"制式":result.mode,"Band":result.band,"信道":result.channel,"频点类型":result.channel_type,"测试模式":result.test_mode,"灵敏度(dBm)":"-" if result.sensitivity is None else f"{result.sensitivity:g}","规格上限(dBm)":self._format_number(getattr(result,"sensitivity_upper",None)),"PASS数量":result.pass_count,"FAIL数量":result.fail_count,"总数":result.total_count,"结果":result.result,"备注":result.remark}
+        return {"Run ID":getattr(result,"run_id",""),"数据来源":getattr(result,"data_source",""),"制式":result.mode,"Band":result.band,"信道":result.channel,"频点类型":result.channel_type,"测试模式":result.test_mode,"带宽(MHz)":self._format_number(getattr(result,"bw",None)),"灵敏度(dBm)":"-" if result.sensitivity is None else f"{result.sensitivity:g}","PASS数量":result.pass_count,"FAIL数量":result.fail_count,"总数":result.total_count,"结果":result.result,"备注":result.remark}
     def _result_background(self,result):
         if result=="PASS": return QColor("#eaf7ea")
         if result=="FAIL": return QColor("#fdecec")
