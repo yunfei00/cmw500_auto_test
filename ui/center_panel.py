@@ -20,68 +20,52 @@ LogCallback = Callable[[str, str], None]
 
 class CenterPanel(QWidget):
     HEADERS = ["Run ID", "序号", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "仪表下发电平(dBm)", "总线损(dB)", "指标类型", "指标值", "尝试次数", "扫描阶段", "结果", "状态", "错误信息", "时间"]
-    SUMMARY_HEADERS = ["Run ID", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "灵敏度(dBm)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
+    SUMMARY_HEADERS = ["Run ID", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "灵敏度(dBm)", "RSRP(dBm)", "RSRQ(dB)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
 
     def __init__(self) -> None:
-        super().__init__()
-        self._logger: LogCallback | None = None
-        self.summary_labels: dict[str, QLabel] = {}
-        self.test_results: list[TestResult] = []
-        self.summary_results: list[SummaryResult] = []
-        self.run_metadata: dict = {}
-        self.run_active = False
-        self.setMinimumWidth(520)
-        layout = QVBoxLayout(self); layout.setContentsMargins(8,8,8,8); layout.setSpacing(8)
-        self.simulation_banner = QLabel("SIMULATION / 模拟数据，不得作为正式实测报告")
-        self.simulation_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.simulation_banner.setStyleSheet("background:#9b1c1c;color:white;font-weight:bold;padding:6px;border-radius:3px;")
-        self.simulation_banner.hide(); layout.addWidget(self.simulation_banner)
-        layout.addWidget(self._create_summary_bar()); layout.addLayout(self._create_table_toolbar())
-        self.tab_widget=QTabWidget(); self.realtime_tab=QWidget(); self.summary_tab=QWidget()
-        self.table=self._create_table(self.HEADERS); self.summary_table=self._create_table(self.SUMMARY_HEADERS)
-        realtime_layout=QVBoxLayout(self.realtime_tab); realtime_layout.setContentsMargins(0,0,0,0); realtime_layout.addWidget(self.table)
-        summary_layout=QVBoxLayout(self.summary_tab); summary_layout.setContentsMargins(0,0,0,0); summary_layout.addWidget(self.summary_table)
-        self.tab_widget.addTab(self.summary_tab,"汇总结果"); self.tab_widget.addTab(self.realtime_tab,"实时数据"); layout.addWidget(self.tab_widget,1)
-        self.tab_widget.setCurrentWidget(self.summary_tab)
-
-    def set_logger(self, logger): self._logger=logger
-    def begin_run(self, metadata):
-        self._reset_results(); self.run_metadata=dict(metadata); self.run_active=True
-        simulated=self.run_metadata.get("data_source")=="SIMULATION"; self.simulation_banner.setText("SIMULATION / 模拟数据，不得作为正式实测报告"); self.simulation_banner.setVisible(simulated)
-        self.clear_button.setEnabled(False); self.export_button.setEnabled(False); self._log("INFO",f"新建测试任务：{self.run_metadata.get('run_id','-')}")
-    def finish_run(self, metadata):
-        self.run_metadata=dict(metadata); self.run_active=False; self.clear_button.setEnabled(True); self.export_button.setEnabled(True); self.generate_summary_from_current_results()
-        terminal_status=str(self.run_metadata.get("status","FAILED")).upper(); self.run_metadata["status"]=terminal_status; banner_messages=[]
-        if self.run_metadata.get("data_source")=="SIMULATION": banner_messages.append("SIMULATION / 模拟数据")
-        if terminal_status!="COMPLETED": banner_messages.append("安全清理未确认：结果无效，请立即人工确认 RF 状态" if terminal_status=="FAILED_UNSAFE" else f"测试未完整结束（{terminal_status}）：不得作为正式 PASS 结论")
-        self.simulation_banner.setText(" | ".join(banner_messages)); self.simulation_banner.setVisible(bool(banner_messages))
+        super().__init__(); self._logger=None; self.summary_labels={}; self.test_results=[]; self.summary_results=[]; self.run_metadata={}; self.run_active=False; self.setMinimumWidth(520)
+        layout=QVBoxLayout(self); layout.setContentsMargins(8,8,8,8); layout.setSpacing(8)
+        self.simulation_banner=QLabel("SIMULATION / 模拟数据，不得作为正式实测报告"); self.simulation_banner.setAlignment(Qt.AlignmentFlag.AlignCenter); self.simulation_banner.setStyleSheet("background:#9b1c1c;color:white;font-weight:bold;padding:6px;border-radius:3px;"); self.simulation_banner.hide(); layout.addWidget(self.simulation_banner)
+        layout.addWidget(self._create_summary_bar()); layout.addLayout(self._create_table_toolbar()); self.tab_widget=QTabWidget(); self.realtime_tab=QWidget(); self.summary_tab=QWidget(); self.table=self._create_table(self.HEADERS); self.summary_table=self._create_table(self.SUMMARY_HEADERS)
+        rl=QVBoxLayout(self.realtime_tab); rl.setContentsMargins(0,0,0,0); rl.addWidget(self.table); sl=QVBoxLayout(self.summary_tab); sl.setContentsMargins(0,0,0,0); sl.addWidget(self.summary_table); self.tab_widget.addTab(self.summary_tab,"汇总结果"); self.tab_widget.addTab(self.realtime_tab,"实时数据"); layout.addWidget(self.tab_widget,1); self.tab_widget.setCurrentWidget(self.summary_tab)
+    def set_logger(self,logger): self._logger=logger
+    def begin_run(self,metadata):
+        self._reset_results(); self.run_metadata=dict(metadata); self.run_active=True; simulated=self.run_metadata.get("data_source")=="SIMULATION"; self.simulation_banner.setText("SIMULATION / 模拟数据，不得作为正式实测报告"); self.simulation_banner.setVisible(simulated); self.clear_button.setEnabled(False); self.export_button.setEnabled(False); self._log("INFO",f"新建测试任务：{self.run_metadata.get('run_id','-')}")
+    def finish_run(self,metadata):
+        self.run_metadata=dict(metadata); self.run_active=False; self.clear_button.setEnabled(True); self.export_button.setEnabled(True); self.generate_summary_from_current_results(); terminal_status=str(self.run_metadata.get("status","FAILED")).upper(); self.run_metadata["status"]=terminal_status; msgs=[]
+        if self.run_metadata.get("data_source")=="SIMULATION": msgs.append("SIMULATION / 模拟数据")
+        if terminal_status!="COMPLETED": msgs.append("安全清理未确认：结果无效，请立即人工确认 RF 状态" if terminal_status=="FAILED_UNSAFE" else f"测试未完整结束（{terminal_status}）：不得作为正式 PASS 结论")
+        self.simulation_banner.setText(" | ".join(msgs)); self.simulation_banner.setVisible(bool(msgs))
         if terminal_status!="COMPLETED":
-            for result in self.summary_results: result.result=terminal_status; result.remark=f"Run {terminal_status}; {result.remark}"
+            for r in self.summary_results: r.result=terminal_status; r.remark=f"Run {terminal_status}; {r.remark}"
             self.update_summary_table(self.summary_results)
-        autosave_dir=ensure_user_data_dir()/"runs"; autosave_dir.mkdir(parents=True,exist_ok=True); autosave_path=autosave_dir/f"{self.run_metadata.get('run_id','unknown')}.xlsx"; self.run_metadata["autosave_path"]=str(autosave_path)
-        try: export_results_to_excel(self.test_results,self.summary_results,str(autosave_path),run_metadata=self.run_metadata); self._log("INFO",f"任务结果已自动保存：{autosave_path}")
+        d=ensure_user_data_dir()/"runs"; d.mkdir(parents=True,exist_ok=True); p=d/f"{self.run_metadata.get('run_id','unknown')}.xlsx"; self.run_metadata["autosave_path"]=str(p)
+        try: export_results_to_excel(self.test_results,self.summary_results,str(p),run_metadata=self.run_metadata); self._log("INFO",f"任务结果已自动保存：{p}")
         except Exception as exc: self._log("ERROR",f"任务结果自动保存失败：{exc}")
         self._log("INFO",f"测试任务终态：{terminal_status}")
     def add_test_row(self,result):
+        # A final-reference refresh re-emits the same TestResult object after RSRP/RSRQ
+        # collection. Rebuild summary without duplicating the raw measurement row.
+        if isinstance(result,TestResult) and any(existing is result for existing in self.test_results):
+            self.summary_results=build_lte_summary(self.test_results); self.update_summary_table(self.summary_results); return
         row=self.table.rowCount(); self.table.insertRow(row)
         if isinstance(result,TestResult): self.test_results.append(result)
-        row_data=self._normalize_row_data(result); row_data.setdefault("序号",str(row+1)); row_result=str(row_data.get("结果","")).upper(); background=self._result_background(row_result)
-        for column,header in enumerate(self.HEADERS):
-            item=QTableWidgetItem(str(row_data.get(header,""))); item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if background: item.setBackground(background)
-            if header=="结果" and row_result=="PASS": item.setForeground(Qt.GlobalColor.darkGreen)
-            elif header=="结果" and row_result=="FAIL": item.setForeground(Qt.GlobalColor.red)
-            self.table.setItem(row,column,item)
+        rd=self._normalize_row_data(result); rd.setdefault("序号",str(row+1)); rr=str(rd.get("结果","")).upper(); bg=self._result_background(rr)
+        for col,h in enumerate(self.HEADERS):
+            item=QTableWidgetItem(str(rd.get(h,""))); item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if bg: item.setBackground(bg)
+            if h=="结果" and rr=="PASS": item.setForeground(Qt.GlobalColor.darkGreen)
+            elif h=="结果" and rr=="FAIL": item.setForeground(Qt.GlobalColor.red)
+            self.table.setItem(row,col,item)
         if self.auto_scroll_checkbox.isChecked(): self.table.scrollToBottom()
-        self.summary_results=build_lte_summary(self.test_results)
-        self.update_summary_table(self.summary_results)
+        self.summary_results=build_lte_summary(self.test_results); self.update_summary_table(self.summary_results)
     def update_summary(self,data):
-        key_map={"current_mode":"当前制式","current_band":"当前Band","current_channel":"当前信道","current_level":"当前电平","progress":"当前进度"}
-        for key,value in {key_map.get(k,k):v for k,v in data.items()}.items():
-            if key in self.summary_labels: self.summary_labels[key].setText(f"{key}：{value}")
-    def update_summary_table(self,summary_results):
+        km={"current_mode":"当前制式","current_band":"当前Band","current_channel":"当前信道","current_level":"当前电平","progress":"当前进度"}
+        for k,v in {km.get(k,k):v for k,v in data.items()}.items():
+            if k in self.summary_labels: self.summary_labels[k].setText(f"{k}：{v}")
+    def update_summary_table(self,results):
         self.summary_table.setRowCount(0)
-        for sr in summary_results:
+        for sr in results:
             row=self.summary_table.rowCount(); self.summary_table.insertRow(row); rd=self._summary_result_to_row_data(sr); rr=str(rd.get("结果","")).upper(); bg=self._result_background(rr)
             for col,h in enumerate(self.SUMMARY_HEADERS):
                 item=QTableWidgetItem(str(rd.get(h,""))); item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -89,50 +73,45 @@ class CenterPanel(QWidget):
                 if h=="结果" and rr=="PASS": item.setForeground(Qt.GlobalColor.darkGreen)
                 elif h=="结果" and rr=="FAIL": item.setForeground(Qt.GlobalColor.red)
                 self.summary_table.setItem(row,col,item)
-    def generate_summary_from_current_results(self):
-        self._log("INFO","开始生成汇总结果"); self.summary_results=build_lte_summary(self.test_results); self.update_summary_table(self.summary_results); self._log("INFO",f"共生成 {len(self.summary_results)} 条汇总结果"); self.tab_widget.setCurrentWidget(self.summary_tab)
+    def generate_summary_from_current_results(self): self._log("INFO","开始生成汇总结果"); self.summary_results=build_lte_summary(self.test_results); self.update_summary_table(self.summary_results); self._log("INFO",f"共生成 {len(self.summary_results)} 条汇总结果"); self.tab_widget.setCurrentWidget(self.summary_tab)
     def _log(self,level,message):
         if self._logger: self._logger(level,message)
     def _create_summary_bar(self):
-        frame=QFrame(); frame.setObjectName("summaryBar"); frame.setFrameShape(QFrame.Shape.StyledPanel); frame.setStyleSheet("QFrame#summaryBar {background:#ffffff;border:1px solid #c3cbd4;border-radius:4px;}")
-        layout=QHBoxLayout(frame); layout.setContentsMargins(10,8,10,8); layout.setSpacing(14)
-        for key in ["当前制式","当前Band","当前信道","当前电平","当前进度"]:
-            label=QLabel(f"{key}：{'0/0' if key=='当前进度' else '-'}"); label.setMinimumWidth(88); self.summary_labels[key]=label; layout.addWidget(label)
-        layout.addStretch(1); return frame
+        f=QFrame(); f.setObjectName("summaryBar"); f.setFrameShape(QFrame.Shape.StyledPanel); f.setStyleSheet("QFrame#summaryBar {background:#ffffff;border:1px solid #c3cbd4;border-radius:4px;}"); l=QHBoxLayout(f); l.setContentsMargins(10,8,10,8); l.setSpacing(14)
+        for k in ["当前制式","当前Band","当前信道","当前电平","当前进度"]:
+            label=QLabel(f"{k}：{'0/0' if k=='当前进度' else '-'}"); label.setMinimumWidth(88); self.summary_labels[k]=label; l.addWidget(label)
+        l.addStretch(1); return f
     def _create_table_toolbar(self):
-        layout=QHBoxLayout(); self.clear_button=QPushButton("清空表格"); self.export_button=QPushButton("导出当前结果"); self.auto_scroll_checkbox=QCheckBox("自动滚动到底部"); self.auto_scroll_checkbox.setChecked(True)
-        self.clear_button.clicked.connect(self._clear_table); self.export_button.clicked.connect(self._export_current_results); layout.addWidget(self.clear_button); layout.addWidget(self.export_button); layout.addStretch(1); layout.addWidget(self.auto_scroll_checkbox); return layout
+        l=QHBoxLayout(); self.clear_button=QPushButton("清空表格"); self.export_button=QPushButton("导出当前结果"); self.auto_scroll_checkbox=QCheckBox("自动滚动到底部"); self.auto_scroll_checkbox.setChecked(True); self.clear_button.clicked.connect(self._clear_table); self.export_button.clicked.connect(self._export_current_results); l.addWidget(self.clear_button); l.addWidget(self.export_button); l.addStretch(1); l.addWidget(self.auto_scroll_checkbox); return l
     def _clear_table(self):
         if self.run_active: self._log("WARNING","测试运行中不能清空结果"); return
         self._reset_results(); self.run_metadata={}; self.simulation_banner.hide(); self._log("INFO","已清空实时测试数据和汇总结果")
-    def _reset_results(self):
-        self.table.setRowCount(0); self.summary_table.setRowCount(0); self.test_results.clear(); self.summary_results.clear(); self.update_summary({"当前制式":"-","当前Band":"-","当前信道":"-","当前电平":"-","当前进度":"0/0"}); self.tab_widget.setCurrentWidget(self.summary_tab)
+    def _reset_results(self): self.table.setRowCount(0); self.summary_table.setRowCount(0); self.test_results.clear(); self.summary_results.clear(); self.update_summary({"当前制式":"-","当前Band":"-","当前信道":"-","当前电平":"-","当前进度":"0/0"}); self.tab_widget.setCurrentWidget(self.summary_tab)
     def _create_table(self,headers):
-        table=QTableWidget(0,len(headers)); table.setHorizontalHeaderLabels(headers); table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers); table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection); table.setAlternatingRowColors(True); table.verticalHeader().setVisible(False); table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch); table.horizontalHeader().setMinimumSectionSize(72); return table
+        t=QTableWidget(0,len(headers)); t.setHorizontalHeaderLabels(headers); t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers); t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); t.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection); t.setAlternatingRowColors(True); t.verticalHeader().setVisible(False); t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch); t.horizontalHeader().setMinimumSectionSize(72); return t
     def _export_current_results(self):
         if not self.summary_results and self.test_results: self.summary_results=build_lte_summary(self.test_results); self.update_summary_table(self.summary_results)
-        run_id=str(self.run_metadata.get("run_id",""))[:8]; suffix=f"_{run_id}" if run_id else ""; default_name=f"cmw500_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}.xlsx"
-        file_path,_=QFileDialog.getSaveFileName(self,"导出当前结果",default_name,"Excel 工作簿 (*.xlsx);;所有文件 (*.*)")
-        if not file_path: return
-        if not file_path.lower().endswith(".xlsx"): file_path=f"{file_path}.xlsx"
-        try: export_results_to_excel(self.test_results,self.summary_results,file_path,run_metadata=self.run_metadata)
+        rid=str(self.run_metadata.get("run_id",""))[:8]; suffix=f"_{rid}" if rid else ""; name=f"cmw500_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}.xlsx"; path,_=QFileDialog.getSaveFileName(self,"导出当前结果",name,"Excel 工作簿 (*.xlsx);;所有文件 (*.*)")
+        if not path: return
+        if not path.lower().endswith(".xlsx"): path=f"{path}.xlsx"
+        try: export_results_to_excel(self.test_results,self.summary_results,path,run_metadata=self.run_metadata)
         except Exception as exc: self._log("ERROR",f"结果导出失败：{exc}"); return
-        self._log("INFO",f"结果已导出：{file_path}")
-    def _normalize_row_data(self,result):
-        if isinstance(result,TestResult) or is_dataclass(result):
-            return {"Run ID":getattr(result,"run_id",""),"序号":result.index,"数据来源":getattr(result,"data_source",""),"制式":result.mode,"Band":result.band,"信道":result.channel,"频点类型":result.channel_type,"测试模式":result.test_mode,"带宽(MHz)":self._format_number(getattr(result,"bw",None)),"仪表下发电平(dBm)":self._format_number(getattr(result,"instrument_level",None)),"总线损(dB)":self._format_number(getattr(result,"total_loss",None)),"指标类型":result.metric_type,"指标值":self._format_number(result.metric_value,decimals=2),"尝试次数":getattr(result,"attempt",1),"扫描阶段":getattr(result,"scan_phase",""),"结果":result.result,"状态":result.status,"错误信息":getattr(result,"error_message",""),"时间":result.timestamp}
-        return dict(result)
-    def _summary_result_to_row_data(self,result):
-        return {"Run ID":getattr(result,"run_id",""),"数据来源":getattr(result,"data_source",""),"制式":result.mode,"Band":result.band,"信道":result.channel,"频点类型":result.channel_type,"测试模式":result.test_mode,"带宽(MHz)":self._format_number(getattr(result,"bw",None)),"灵敏度(dBm)":"-" if result.sensitivity is None else f"{result.sensitivity:g}","PASS数量":result.pass_count,"FAIL数量":result.fail_count,"总数":result.total_count,"结果":result.result,"备注":result.remark}
-    def _result_background(self,result):
-        if result=="PASS": return QColor("#eaf7ea")
-        if result=="FAIL": return QColor("#fdecec")
-        if result in {"ERROR","异常"}: return QColor("#fff7d6")
-        if result in {"STOPPED","FAILED","FAILED_UNSAFE"}: return QColor("#fff0c2")
+        self._log("INFO",f"结果已导出：{path}")
+    def _normalize_row_data(self,r):
+        if isinstance(r,TestResult) or is_dataclass(r): return {"Run ID":getattr(r,"run_id",""),"序号":r.index,"数据来源":getattr(r,"data_source",""),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"仪表下发电平(dBm)":self._format_number(getattr(r,"instrument_level",None)),"总线损(dB)":self._format_number(getattr(r,"total_loss",None)),"指标类型":r.metric_type,"指标值":self._format_number(r.metric_value,2),"尝试次数":getattr(r,"attempt",1),"扫描阶段":getattr(r,"scan_phase",""),"结果":r.result,"状态":r.status,"错误信息":getattr(r,"error_message",""),"时间":r.timestamp}
+        return dict(r)
+    def _summary_result_to_row_data(self,r):
+        ref_unavailable=getattr(r,"reference_metrics_status","")=="UNAVAILABLE"
+        return {"Run ID":getattr(r,"run_id",""),"数据来源":getattr(r,"data_source",""),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"灵敏度(dBm)":"-" if r.sensitivity is None else f"{r.sensitivity:g}","RSRP(dBm)":"N/A" if ref_unavailable or r.rsrp is None else f"{r.rsrp:g}","RSRQ(dB)":"N/A" if ref_unavailable or r.rsrq is None else f"{r.rsrq:g}","PASS数量":r.pass_count,"FAIL数量":r.fail_count,"总数":r.total_count,"结果":r.result,"备注":r.remark}
+    def _result_background(self,r):
+        if r=="PASS": return QColor("#eaf7ea")
+        if r=="FAIL": return QColor("#fdecec")
+        if r in {"ERROR","异常"}: return QColor("#fff7d6")
+        if r in {"STOPPED","FAILED","FAILED_UNSAFE"}: return QColor("#fff0c2")
         return None
     @staticmethod
     def _format_number(value,decimals=None):
         if value is None: return "-"
-        try: number=float(value)
+        try: n=float(value)
         except (TypeError,ValueError): return str(value)
-        return f"{number:.{decimals}f}" if decimals is not None else f"{number:g}"
+        return f"{n:.{decimals}f}" if decimals is not None else f"{n:g}"
