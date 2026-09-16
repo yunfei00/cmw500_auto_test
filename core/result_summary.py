@@ -22,6 +22,9 @@ class SummaryResult:
     data_source: str = "UNKNOWN"
     bw: float | None = None
     error_count: int = 0
+    rsrp: float | None = None
+    rsrq: float | None = None
+    reference_metrics_status: str = ""
 
 
 def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
@@ -53,9 +56,6 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
         bw,
     ), group in grouped_results.items():
         terminal_items = _terminal_attempts(group)
-        # The fast sensitivity policy completes a channel only when the fine scan
-        # finds its first PASS point. Do not expose intermediate FAST/CONFIRM
-        # points as a summary row.
         fine_passes = [
             item
             for item in terminal_items
@@ -64,10 +64,15 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
         if not fine_passes:
             continue
 
-        sensitivity = min(item.rx_level for item in fine_passes)
+        final_item = min(fine_passes, key=lambda item: item.rx_level)
+        sensitivity = final_item.rx_level
         pass_items = [item for item in group if item.result.upper() == "PASS"]
         fail_items = [item for item in group if item.result.upper() == "FAIL"]
         error_items = [item for item in group if item.result.upper() == "ERROR"]
+        ref_status = getattr(final_item, "reference_metrics_status", "")
+        remark = f"Sensitivity = {sensitivity:g} dBm"
+        if ref_status == "UNAVAILABLE":
+            remark += "; RSRP/RSRQ unavailable"
 
         summary_results.append(
             SummaryResult(
@@ -81,11 +86,14 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
                 fail_count=len(fail_items),
                 total_count=len(group),
                 result="PASS",
-                remark=f"Sensitivity = {sensitivity:g} dBm",
+                remark=remark,
                 run_id=run_id,
                 data_source=data_source,
                 bw=bw,
                 error_count=len(error_items),
+                rsrp=getattr(final_item, "rsrp", None),
+                rsrq=getattr(final_item, "rsrq", None),
+                reference_metrics_status=ref_status,
             )
         )
 
