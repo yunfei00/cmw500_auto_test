@@ -34,7 +34,9 @@ class RightPanel(QWidget):
         layout.addWidget(self.log_edit, 1)
 
     def append_log(self, level: str, message: str) -> None:
-        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        # Operator-facing logs use local wall-clock time only. Keep milliseconds
+        # for SCPI/test timing analysis, but omit ISO T and timezone suffix.
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         line = f"[{timestamp}][{level}] {message}"
         self.log_edit.appendPlainText(line)
         self.log_edit.verticalScrollBar().setValue(self.log_edit.verticalScrollBar().maximum())
