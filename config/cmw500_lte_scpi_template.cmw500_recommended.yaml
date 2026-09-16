@@ -40,7 +40,14 @@ lte:
       command: "CONFigure:LTE:SIGN:DL:RSEPre:LEVel {rx_level}"
 
   measure_bler:
+    # packet_count changes by scan phase: FAST normally uses 100, while
+    # CONFIRM/FINE use the configured formal count (normally 1000).  The
+    # CMW500 keeps SFRames as instrument state, so it must be written before
+    # every BLER INIT; setting it only during cell setup would leave every
+    # subsequent measurement at the original 1000 packets.
     start:
+      - type: write
+        command: "CONFigure:LTE:SIGN:EBLer:SFRames {packet_count}"
       - type: write
         command: "INITiate:LTE:SIGN:EBLer"
     state_query: "FETCh:LTE:SIGN:EBLer:STATe?"
@@ -74,7 +81,7 @@ lte:
     - type: query_and_assert
       command: "SOURce:LTE:SIGN:CELL:STATe?"
       parser: "regex"
-      expected: '^\s*OFF\s*$'
+      expected: '^\\s*OFF\\s*$'
 
   cleanup:
     - type: query
