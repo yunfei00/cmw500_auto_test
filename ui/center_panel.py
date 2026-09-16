@@ -41,7 +41,8 @@ class CenterPanel(QWidget):
         self.table=self._create_table(self.HEADERS); self.summary_table=self._create_table(self.SUMMARY_HEADERS)
         realtime_layout=QVBoxLayout(self.realtime_tab); realtime_layout.setContentsMargins(0,0,0,0); realtime_layout.addWidget(self.table)
         summary_layout=QVBoxLayout(self.summary_tab); summary_layout.setContentsMargins(0,0,0,0); summary_layout.addWidget(self.summary_table)
-        self.tab_widget.addTab(self.realtime_tab,"实时数据"); self.tab_widget.addTab(self.summary_tab,"汇总结果"); layout.addWidget(self.tab_widget,1)
+        self.tab_widget.addTab(self.summary_tab,"汇总结果"); self.tab_widget.addTab(self.realtime_tab,"实时数据"); layout.addWidget(self.tab_widget,1)
+        self.tab_widget.setCurrentWidget(self.summary_tab)
 
     def set_logger(self, logger): self._logger=logger
     def begin_run(self, metadata):
@@ -72,6 +73,10 @@ class CenterPanel(QWidget):
             elif header=="结果" and row_result=="FAIL": item.setForeground(Qt.GlobalColor.red)
             self.table.setItem(row,column,item)
         if self.auto_scroll_checkbox.isChecked(): self.table.scrollToBottom()
+        # Rebuild the compact summary as each measurement arrives so the operator
+        # can watch the current channel converge without opening the raw-data tab.
+        self.summary_results=build_lte_summary(self.test_results)
+        self.update_summary_table(self.summary_results)
     def update_summary(self,data):
         key_map={"current_mode":"当前制式","current_band":"当前Band","current_channel":"当前信道","current_level":"当前电平","progress":"当前进度"}
         for key,value in {key_map.get(k,k):v for k,v in data.items()}.items():
@@ -103,7 +108,7 @@ class CenterPanel(QWidget):
         if self.run_active: self._log("WARNING","测试运行中不能清空结果"); return
         self._reset_results(); self.run_metadata={}; self.simulation_banner.hide(); self._log("INFO","已清空实时测试数据和汇总结果")
     def _reset_results(self):
-        self.table.setRowCount(0); self.summary_table.setRowCount(0); self.test_results.clear(); self.summary_results.clear(); self.update_summary({"当前制式":"-","当前Band":"-","当前信道":"-","当前电平":"-","当前进度":"0/0"}); self.tab_widget.setCurrentWidget(self.realtime_tab)
+        self.table.setRowCount(0); self.summary_table.setRowCount(0); self.test_results.clear(); self.summary_results.clear(); self.update_summary({"当前制式":"-","当前Band":"-","当前信道":"-","当前电平":"-","当前进度":"0/0"}); self.tab_widget.setCurrentWidget(self.summary_tab)
     def _create_table(self,headers):
         table=QTableWidget(0,len(headers)); table.setHorizontalHeaderLabels(headers); table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers); table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection); table.setAlternatingRowColors(True); table.verticalHeader().setVisible(False); table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch); table.horizontalHeader().setMinimumSectionSize(72); return table
     def _export_current_results(self):
