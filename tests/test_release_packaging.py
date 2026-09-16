@@ -209,6 +209,7 @@ def test_create_zip_verifies_resources_and_writes_sha256_manifest(
     _create_minimal_release_tree(app_dist_dir, "v1.2.3")
     monkeypatch.setattr(package_release, "APP_DIST_DIR", app_dist_dir)
     monkeypatch.setattr(package_release, "RELEASE_DIR", release_dir)
+    monkeypatch.setenv(package_release.REQUIRE_SIGNING_ENV, "1")
     verified_signatures: list[Path] = []
     monkeypatch.setattr(
         package_release,
@@ -226,6 +227,24 @@ def test_create_zip_verifies_resources_and_writes_sha256_manifest(
 
     expected_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     assert manifest_path.read_text(encoding="ascii") == f"{expected_hash}  {zip_path.name}\n"
+
+
+def test_unsigned_release_package_skips_authenticode_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_dist_dir = tmp_path / "dist" / package_release.APP_NAME
+    release_dir = tmp_path / "release"
+    _create_minimal_release_tree(app_dist_dir, "v1.2.3")
+    monkeypatch.setattr(package_release, "APP_DIST_DIR", app_dist_dir)
+    monkeypatch.setattr(package_release, "RELEASE_DIR", release_dir)
+    monkeypatch.delenv(package_release.REQUIRE_SIGNING_ENV, raising=False)
+
+    def fail_if_called(_path: Path) -> None:
+        raise AssertionError("signature verification should be skipped")
+
+    monkeypatch.setattr(package_release, "verify_authenticode_signature", fail_if_called)
+    package_release.create_zip("v1.2.3")
 
 
 def test_create_zip_fails_when_a_critical_resource_is_missing(
@@ -285,8 +304,7 @@ def test_signing_can_be_made_mandatory_without_storing_a_certificate(
 
     monkeypatch.delenv(build_windows.REQUIRE_SIGNING_ENV, raising=False)
     monkeypatch.setattr(build_windows, "resolve_runtime_version", lambda: "v1.2.3")
-    with pytest.raises(RuntimeError, match="Signing is required"):
-        build_windows.sign_windows_executable()
+    assert build_windows.sign_windows_executable() is False
 
     monkeypatch.setenv(build_windows.SIGNTOOL_PATH_ENV, "signtool")
     monkeypatch.setenv(build_windows.SIGN_CERT_SHA1_ENV, "invalid")
