@@ -4,7 +4,12 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from app_info import APP_ID, APP_NAME, APP_VERSION, ORGANIZATION_NAME
-from ui.main_window import MainWindow
+from core.lte_fast_scan_policy import apply_lte_fast_scan_policy
+
+# Apply the LTE V1 scan behavior before MainWindow/LeftPanel instances are created.
+apply_lte_fast_scan_policy()
+
+from ui.main_window import MainWindow  # noqa: E402
 
 
 def verify_runtime_dependencies() -> None:
