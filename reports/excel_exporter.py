@@ -8,8 +8,8 @@ import tempfile
 from core.models import TestResult
 from core.result_summary import SummaryResult
 
-RAW_HEADERS = ["Run ID", "序号", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "仪表下发电平(dBm)", "全局线损(dB)", "信道线损(dB)", "总线损(dB)", "指标类型", "指标值", "包数", "BLER门限(%)", "灵敏度规格上限(dBm)", "尝试次数", "扫描阶段", "结果", "状态", "错误信息", "时间"]
-SUMMARY_HEADERS = ["Run ID", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "灵敏度(dBm)", "规格上限(dBm)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
+RAW_HEADERS = ["Run ID", "序号", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "仪表下发电平(dBm)", "全局线损(dB)", "信道线损(dB)", "总线损(dB)", "指标类型", "指标值", "包数", "BLER门限(%)", "尝试次数", "扫描阶段", "结果", "状态", "错误信息", "时间"]
+SUMMARY_HEADERS = ["Run ID", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "灵敏度(dBm)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
 
 def export_results_to_excel(raw_results, summary_results, file_path, run_metadata=None):
     from openpyxl import Workbook
@@ -51,10 +51,10 @@ def _auto_fit_columns(sheet):
         max_length=max((len("" if c.value is None else str(c.value)) for c in cells),default=0); sheet.column_dimensions[get_column_letter(i)].width=min(max(max_length+2,10),32)
 
 def _raw_result_row(result):
-    return [getattr(result,"run_id",""),result.index,getattr(result,"data_source",""),result.mode,result.band,result.channel,result.channel_type,result.test_mode,getattr(result,"bw",None),getattr(result,"instrument_level",None),getattr(result,"global_cable_loss",None),getattr(result,"channel_loss",None),getattr(result,"total_loss",None),result.metric_type,result.metric_value,getattr(result,"packet_count",None),getattr(result,"bler_threshold",None),getattr(result,"sensitivity_upper",None),getattr(result,"attempt",1),getattr(result,"scan_phase",""),result.result,result.status,getattr(result,"error_message",""),result.timestamp]
+    return [getattr(result,"run_id",""),result.index,getattr(result,"data_source",""),result.mode,result.band,result.channel,result.channel_type,result.test_mode,getattr(result,"bw",None),getattr(result,"instrument_level",None),getattr(result,"global_cable_loss",None),getattr(result,"channel_loss",None),getattr(result,"total_loss",None),result.metric_type,result.metric_value,getattr(result,"packet_count",None),getattr(result,"bler_threshold",None),getattr(result,"attempt",1),getattr(result,"scan_phase",""),result.result,result.status,getattr(result,"error_message",""),result.timestamp]
 
 def _summary_result_row(result):
-    return [getattr(result,"run_id",""),getattr(result,"data_source",""),result.mode,result.band,result.channel,result.channel_type,result.test_mode,"-" if result.sensitivity is None else result.sensitivity,getattr(result,"sensitivity_upper",None),result.pass_count,result.fail_count,result.total_count,result.result,result.remark]
+    return [getattr(result,"run_id",""),getattr(result,"data_source",""),result.mode,result.band,result.channel,result.channel_type,result.test_mode,getattr(result,"bw",None),"-" if result.sensitivity is None else result.sensitivity,result.pass_count,result.fail_count,result.total_count,result.result,result.remark]
 
 def _write_metadata_sheet(sheet,metadata,warnings,header_fill,header_font):
     from openpyxl.styles import Font, PatternFill
