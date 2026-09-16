@@ -34,6 +34,9 @@ class LteTestConfig:
     # LTE Signaling RF route selected by the UI. Kept in the run snapshot for
     # reproducibility; COM1..COM4 map to the validated SCELL routes.
     com_port: int = 1
+    # LTE PUSCH power-control values configured before Cell ON.
+    pusch_open_loop_nom_power: float = 23.0
+    pusch_closed_loop_target_power: float = 0.0
 
 
 @dataclass
