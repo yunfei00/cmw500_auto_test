@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Allow sub-second LTE settle time values end-to-end."""
+"""Allow sub-second LTE settle time values without regressing LTE V1 UI policy."""
 
 from PySide6.QtWidgets import QDoubleSpinBox
 
@@ -12,11 +12,25 @@ _original_create_lte_instrument_group = LeftPanel._create_lte_instrument_group
 _original_collect_lte_config = LeftPanel.collect_lte_config
 
 
+def _hide_legacy_field(form, widget) -> None:
+    """Keep legacy fields available internally while removing them from operator UI."""
+    widget.setVisible(False)
+    if hasattr(form, "labelForField"):
+        label = form.labelForField(widget)
+        if label is not None:
+            label.setVisible(False)
+
+
 def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
     group = _original_create_lte_instrument_group(self)
     form = group.layout()
-    old = self.settle_time_spin
 
+    # Re-assert the LTE V1 UI contract after wrapping the instrument group.
+    # These legacy controls must never reappear because of policy composition.
+    _hide_legacy_field(form, self.sensitivity_upper_spin)
+    _hide_legacy_field(form, self.stop_level_spin)
+
+    old = self.settle_time_spin
     settle = QDoubleSpinBox()
     settle.setRange(0.0, 3600.0)
     settle.setDecimals(2)
@@ -24,8 +38,6 @@ def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
     settle.setSuffix(" s")
     settle.setKeyboardTracking(False)
 
-    # Persisted values remain supported.  For a fresh installation the default
-    # is 0.1 s.  Read as float so values such as 0.1 are never truncated.
     saved = self.settings.value("lte/settle_time", DEFAULT_SETTLE_TIME, float)
     settle.setValue(float(saved))
 
@@ -39,8 +51,6 @@ def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
 
 def _collect_lte_config_with_fractional_settle(self: LeftPanel):
     config = _original_collect_lte_config(self)
-    # The legacy collection path may cast the value to int.  Override it from
-    # the QDoubleSpinBox so the worker always receives the exact decimal value.
     config.settle_time = float(self.settle_time_spin.value())
     self.settings.setValue("lte/settle_time", config.settle_time)
     self.settings.sync()
