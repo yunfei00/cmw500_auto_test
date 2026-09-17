@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """CMW500 UE-report experiment support.
 
-This policy is deliberately isolated from the LTE UI.  It configures the CMW500 UE
-measurement-report interval to 120 ms and samples the serving-cell report after every
-BLER measurement.  Sampling failures are non-fatal because the experiment must not
-change the sensitivity verdict.
+The CMW500 manual requires UE-report settings to be configured before Report is
+enabled.  This policy therefore disables reporting, sets/validates I120, then lets
+the normal LTE prepare-run sequence enable reporting and configure the rest.
+Sampling failures remain non-fatal to the sensitivity verdict.
 """
 
 import re
@@ -14,6 +14,7 @@ from typing import Any
 from devices.cmw500_controller import RealCMW500
 
 
+UE_REPORT_ENABLE_OFF = "CONFigure:LTE:SIGN:UEReport:ENABle OFF"
 UE_REPORT_INTERVAL_COMMAND = "CONFigure:LTE:SIGN:UEReport:RINTerval I120"
 UE_REPORT_INTERVAL_QUERY = "CONFigure:LTE:SIGN:UEReport:RINTerval?"
 UE_REPORT_SCELL_QUERY = "SENSe:LTE:SIGN:UEReport:PCC:SCELl?"
@@ -51,9 +52,6 @@ def _sample_ue_report(self: RealCMW500, bler: float) -> None:
             history = []
             self.ue_report_experiment_samples = history
         history.append(sample)
-
-        # Reuse the existing worker warning bridge so the sample is visible in the
-        # operator log without coupling the instrument controller to Qt signals.
         self.last_warning = (
             "UE实验采样 "
             f"RS_EPRe={sample['rs_epre_dbm']:g} dBm, "
@@ -73,12 +71,24 @@ def apply_lte_ue_report_experiment() -> None:
     original_measure_bler = RealCMW500.measure_bler
 
     def prepare_run(self: RealCMW500, *args: Any, **kwargs: Any) -> None:
-        original_prepare_run(self, *args, **kwargs)
-        # Configure interval before enabling/using report data for the experiment.
+        # R&S manual: configure UE Measurement Report settings BEFORE enabling
+        # Report. The previous implementation did this after ENABle ON, so the
+        # CMW500 legitimately kept the reset/default I1024 value.
+        self.write(UE_REPORT_ENABLE_OFF)
         self.write(UE_REPORT_INTERVAL_COMMAND)
         actual = str(self.query(UE_REPORT_INTERVAL_QUERY)).strip().upper()
-        if "I120" not in actual:
+        if actual != "I120":
             raise RuntimeError(f"UE Report interval 回读异常：期望 I120，实际 {actual!r}")
+
+        # Normal prepare-run subsequently sends UEReport:ENABle ON.
+        original_prepare_run(self, *args, **kwargs)
+
+        # Verify again after enabling so a firmware/state restriction is visible.
+        enabled_actual = str(self.query(UE_REPORT_INTERVAL_QUERY)).strip().upper()
+        if enabled_actual != "I120":
+            raise RuntimeError(
+                f"UE Report interval 启用后回读异常：期望 I120，实际 {enabled_actual!r}"
+            )
         self.ue_report_experiment_samples = []
 
     def measure_bler(self: RealCMW500, packet_count: int) -> float:
