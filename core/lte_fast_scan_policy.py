@@ -7,7 +7,7 @@ from core.test_states import TestState
 from core.test_worker import TestWorker
 from ui.left_panel import LeftPanel
 
-FAST_PACKET_DEFAULT=100; START_LEVEL_DEFAULT=-85.0; MAX_STEP_DEFAULT=0.3; MIN_STEP_DEFAULT=0.1; BLER_THRESHOLD_DEFAULT=5.0
+FAST_PACKET_DEFAULT=100; START_LEVEL_DEFAULT=-90.0; MAX_STEP_DEFAULT=0.3; MIN_STEP_DEFAULT=0.1; BLER_THRESHOLD_DEFAULT=5.0
 FAST_CONFIRM_TRIGGER=1.2; CONFIRM_DIRECT_MIN=4.8; CONFIRM_DIRECT_MAX=5.0
 RECONNECT_BOOST_DB=5.0; RECONNECT_ATTEMPTS=3; ATTACH_ATTEMPTS=3; REFERENCE_METRIC_ATTEMPTS=3
 FULL_CELL_BW_POWER_QUERY="SENSe:LTE:SIGN:DL:PCC:FCPOWer?"
@@ -126,7 +126,6 @@ def _scan_item(self,item,current,total):
         if confirm_bler is None: raise RuntimeError("CONFIRM BLER 结果为空")
         if CONFIRM_DIRECT_MIN<=confirm_bler<=CONFIRM_DIRECT_MAX:
             self.log_signal.emit("INFO",f"CONFIRM BLER={confirm_bler:.2f}% 位于 {CONFIRM_DIRECT_MIN:g}%~{CONFIRM_DIRECT_MAX:g}%，直接确定 Sensitivity={level:g} dBm，不再向上回溯")
-            # Treat this confirmed boundary point as the terminal result so summary BLER/RSRP/RSRQ use it.
             result=getattr(self,"_last_built_test_result",None)
             if result is not None:
                 result.scan_phase="FINE"; result.result="PASS"; result.status="PASS"; self.row_signal.emit(result)
@@ -136,8 +135,9 @@ def _scan_item(self,item,current,total):
         while True:
             fine,recovered=_ensure_connected_for_probe(self,item,fine)
             if recovered: level=fine; break
-            if _measure_with_packets(self,item,fine,"FINE",current,total,formal): self.log_signal.emit("INFO",f"Sensitivity 边界：PASS={fine:g} dBm，FAIL={fail_level:g} dBm"); _collect_reference_metrics(self,item,fine); return
+            if _measure_with_packets(self,item,fine,"FINE",current,total,formal):
+                self.log_signal.emit("INFO",f"Sensitivity 边界：PASS={fine:g} dBm，FAIL={fail_level:g} dBm"); _collect_reference_metrics(self,item,fine); return
             fail_level=fine; fine=round(fine+min_step,10)
 def apply_lte_fast_scan_policy():
-    if getattr(LeftPanel,"_lte_fast_scan_policy_applied",False): return
-    LeftPanel._create_lte_instrument_group=_create_lte_instrument_group; LeftPanel._create_lte_channel_group=_create_lte_channel_group; LeftPanel._create_lte_band_group=_create_lte_band_group; LeftPanel.collect_lte_config=_collect_lte_config; TestWorker._configure_lte_run=_configure_lte_run; TestWorker._prepare_cell=_prepare_cell; TestWorker._scan_item=_scan_item; TestWorker._build_result=_build_result; LeftPanel._lte_fast_scan_policy_applied=True
+    if getattr(TestWorker,"_lte_fast_scan_policy_applied",False): return
+    LeftPanel._create_lte_instrument_group=_create_lte_instrument_group; LeftPanel._create_lte_channel_group=_create_lte_channel_group; LeftPanel._create_lte_band_group=_create_lte_band_group; LeftPanel.collect_lte_config=_collect_lte_config; TestWorker._configure_lte_run=_configure_lte_run; TestWorker._prepare_cell=_prepare_cell; TestWorker._build_result=_build_result; TestWorker._scan_item=_scan_item; TestWorker._lte_fast_scan_policy_applied=True
