@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-"""Allow sub-second LTE settle time values in the operator UI.
-
-The base UI historically used QSpinBox, which restricted settle time to whole
-seconds.  LTE fast scanning needs sub-second experiments, so replace only this
-control with a QDoubleSpinBox while preserving the existing configuration flow.
-"""
+"""Allow sub-second LTE settle time values end-to-end."""
 
 from PySide6.QtWidgets import QDoubleSpinBox
 
 from ui.left_panel import LeftPanel
 
 
+DEFAULT_SETTLE_TIME = 0.1
 _original_create_lte_instrument_group = LeftPanel._create_lte_instrument_group
+_original_collect_lte_config = LeftPanel.collect_lte_config
 
 
 def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
@@ -25,11 +22,11 @@ def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
     settle.setDecimals(2)
     settle.setSingleStep(0.1)
     settle.setSuffix(" s")
+    settle.setKeyboardTracking(False)
 
-    # Read the persisted value as float.  The fast-scan compatibility layer
-    # previously read this setting as int, which would otherwise discard the
-    # decimal part before this widget is created.
-    saved = self.settings.value("lte/settle_time", old.value(), float)
+    # Persisted values remain supported.  For a fresh installation the default
+    # is 0.1 s.  Read as float so values such as 0.1 are never truncated.
+    saved = self.settings.value("lte/settle_time", DEFAULT_SETTLE_TIME, float)
     settle.setValue(float(saved))
 
     if hasattr(form, "replaceWidget"):
@@ -40,8 +37,19 @@ def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
     return group
 
 
+def _collect_lte_config_with_fractional_settle(self: LeftPanel):
+    config = _original_collect_lte_config(self)
+    # The legacy collection path may cast the value to int.  Override it from
+    # the QDoubleSpinBox so the worker always receives the exact decimal value.
+    config.settle_time = float(self.settle_time_spin.value())
+    self.settings.setValue("lte/settle_time", config.settle_time)
+    self.settings.sync()
+    return config
+
+
 def apply_lte_settle_time_policy() -> None:
     if getattr(LeftPanel, "_lte_settle_time_policy_applied", False):
         return
     LeftPanel._create_lte_instrument_group = _create_lte_instrument_group_with_fractional_settle
+    LeftPanel.collect_lte_config = _collect_lte_config_with_fractional_settle
     LeftPanel._lte_settle_time_policy_applied = True
