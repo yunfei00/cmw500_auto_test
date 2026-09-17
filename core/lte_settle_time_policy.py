@@ -20,8 +20,21 @@ def _hide_legacy_field(form, widget) -> None:
             label.setVisible(False)
 
 
+def _ensure_form_row(form, label_text: str, widget) -> None:
+    """Ensure a required LTE control has an actual QFormLayout row."""
+    row = -1
+    if hasattr(form, "getWidgetPosition"):
+        row, _role = form.getWidgetPosition(widget)
+    if row < 0:
+        form.addRow(label_text, widget)
+    widget.setVisible(True)
+    if hasattr(form, "labelForField"):
+        label = form.labelForField(widget)
+        if label is not None:
+            label.setVisible(True)
+
+
 def _replace_form_widget(form, old, new) -> None:
-    """Replace a field while preserving all rows inserted by earlier LTE policies."""
     label = form.labelForField(old) if hasattr(form, "labelForField") else None
     if hasattr(form, "getWidgetPosition") and hasattr(form, "removeRow"):
         row, _role = form.getWidgetPosition(old)
@@ -37,9 +50,6 @@ def _replace_form_widget(form, old, new) -> None:
 
 
 def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
-    # This calls the already-patched LTE V1 group builder first, so FAST packet,
-    # PUSCH open-loop and PUSCH closed-loop controls are created before we touch
-    # the settle-time row.
     group = _original_create_lte_instrument_group(self)
     form = group.layout()
 
@@ -59,19 +69,18 @@ def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
     _replace_form_widget(form, old, settle)
     self.settle_time_spin = settle
 
-    # Defensive visibility assertions: these controls are required LTE V1 UI.
-    for name in (
-        "fast_packet_count_spin",
-        "pusch_open_loop_nom_power_spin",
-        "pusch_closed_loop_target_power_spin",
-    ):
+    # These four rows are part of the current LTE operator contract.  Merely
+    # setting a widget visible is insufficient if an earlier layout operation
+    # removed its row, so explicitly restore missing rows.
+    required_rows = (
+        ("快速测试包个数：", "fast_packet_count_spin"),
+        ("PUSCH开环标称功率：", "pusch_open_loop_nom_power_spin"),
+        ("PUSCH闭环目标功率：", "pusch_closed_loop_target_power_spin"),
+    )
+    for label_text, name in required_rows:
         widget = getattr(self, name, None)
         if widget is not None:
-            widget.setVisible(True)
-            if hasattr(form, "labelForField"):
-                label = form.labelForField(widget)
-                if label is not None:
-                    label.setVisible(True)
+            _ensure_form_row(form, label_text, widget)
     return group
 
 
