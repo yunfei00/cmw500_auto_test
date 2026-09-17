@@ -9,6 +9,7 @@ from core.lte_channel_resilience import apply_lte_channel_resilience
 from core.lte_channel_config_persistence import apply_lte_channel_config_persistence
 from core.lte_start_level_policy import apply_lte_start_level_policy
 from core.lte_operator_summary_policy import apply_lte_operator_summary_policy
+from core.lte_settle_time_policy import apply_lte_settle_time_policy
 
 # Apply the LTE V1 scan behavior before MainWindow/LeftPanel instances are created.
 apply_lte_fast_scan_policy()
@@ -20,6 +21,8 @@ apply_lte_channel_config_persistence()
 apply_lte_start_level_policy()
 # Keep operator logs explicit and expose the terminal FINE-pass BLER in summaries.
 apply_lte_operator_summary_policy()
+# Permit sub-second settle times (for example 0.1 s) without changing scan semantics.
+apply_lte_settle_time_policy()
 
 from ui.main_window import MainWindow  # noqa: E402
 
