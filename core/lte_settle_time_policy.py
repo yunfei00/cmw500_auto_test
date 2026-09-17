@@ -13,7 +13,6 @@ _original_collect_lte_config = LeftPanel.collect_lte_config
 
 
 def _hide_legacy_field(form, widget) -> None:
-    """Keep legacy fields available internally while removing them from operator UI."""
     widget.setVisible(False)
     if hasattr(form, "labelForField"):
         label = form.labelForField(widget)
@@ -21,12 +20,29 @@ def _hide_legacy_field(form, widget) -> None:
             label.setVisible(False)
 
 
+def _replace_form_widget(form, old, new) -> None:
+    """Replace a field while preserving all rows inserted by earlier LTE policies."""
+    label = form.labelForField(old) if hasattr(form, "labelForField") else None
+    if hasattr(form, "getWidgetPosition") and hasattr(form, "removeRow"):
+        row, _role = form.getWidgetPosition(old)
+        if row >= 0:
+            label_text = label.text() if label is not None else "稳定等待时间："
+            form.removeRow(row)
+            form.insertRow(row, label_text, new)
+            return
+    if hasattr(form, "replaceWidget"):
+        form.replaceWidget(old, new)
+        old.hide()
+        old.deleteLater()
+
+
 def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
+    # This calls the already-patched LTE V1 group builder first, so FAST packet,
+    # PUSCH open-loop and PUSCH closed-loop controls are created before we touch
+    # the settle-time row.
     group = _original_create_lte_instrument_group(self)
     form = group.layout()
 
-    # Re-assert the LTE V1 UI contract after wrapping the instrument group.
-    # These legacy controls must never reappear because of policy composition.
     _hide_legacy_field(form, self.sensitivity_upper_spin)
     _hide_legacy_field(form, self.stop_level_spin)
 
@@ -37,15 +53,25 @@ def _create_lte_instrument_group_with_fractional_settle(self: LeftPanel):
     settle.setSingleStep(0.1)
     settle.setSuffix(" s")
     settle.setKeyboardTracking(False)
-
     saved = self.settings.value("lte/settle_time", DEFAULT_SETTLE_TIME, float)
     settle.setValue(float(saved))
 
-    if hasattr(form, "replaceWidget"):
-        form.replaceWidget(old, settle)
-        old.hide()
-        old.deleteLater()
+    _replace_form_widget(form, old, settle)
     self.settle_time_spin = settle
+
+    # Defensive visibility assertions: these controls are required LTE V1 UI.
+    for name in (
+        "fast_packet_count_spin",
+        "pusch_open_loop_nom_power_spin",
+        "pusch_closed_loop_target_power_spin",
+    ):
+        widget = getattr(self, name, None)
+        if widget is not None:
+            widget.setVisible(True)
+            if hasattr(form, "labelForField"):
+                label = form.labelForField(widget)
+                if label is not None:
+                    label.setVisible(True)
     return group
 
 
