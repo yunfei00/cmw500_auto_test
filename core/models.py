@@ -22,7 +22,7 @@ class LteTestConfig:
     max_step: float
     min_step: float
     bler_threshold: float
-    settle_time: int
+    settle_time: float
     retry_count: int
     selected_bands: list[str]
     selected_channel_types: list[str]
