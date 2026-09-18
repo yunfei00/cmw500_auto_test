@@ -14,6 +14,7 @@ def generate_lte_test_plan(
     bands = config.selected_bands or []
     items: list[TestItem] = []
     index = 1
+    scenes = config.scenes or ["灭屏"]
 
     if config.data:
         for row in config.data:
@@ -24,8 +25,10 @@ def generate_lte_test_plan(
 
             channel = int(channel_raw)
             loss_db = _row_loss_db(row, band, lte_channel_manager)
-            items.append(
-                TestItem(
+            for scene in scenes:
+                for scene in scenes:
+                    items.append(
+                        TestItem(
                     index=index,
                     mode="LTE",
                     band=band,
@@ -35,9 +38,11 @@ def generate_lte_test_plan(
                     rx_level=config.start_level,
                     bw=_parse_optional_float(row.get("bw")),
                     loss_db=loss_db,
-                )
-            )
-            index += 1
+                    scene=scene,
+                        scene=scene,
+                        )
+                    )
+                    index += 1
         return items
 
     for band in bands:
@@ -45,8 +50,9 @@ def generate_lte_test_plan(
         for test_item_name, selection in selections:
             channel_type = _channel_type_label(test_item_name, selection)
             for channel in selection.channels:
-                items.append(
-                    TestItem(
+                for scene in scenes:
+                    items.append(
+                        TestItem(
                         index=index,
                         mode="LTE",
                         band=band,
@@ -56,9 +62,10 @@ def generate_lte_test_plan(
                         rx_level=config.start_level,
                         bw=selection.bw,
                         loss_db=selection.loss_db,
+                        scene=scene,
+                        )
                     )
-                )
-                index += 1
+                    index += 1
 
     return items
 
