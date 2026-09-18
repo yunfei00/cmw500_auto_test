@@ -108,7 +108,7 @@ class CenterPanel(QWidget):
         return dict(r)
     def _summary_result_to_row_data(self,r):
         ref_unavailable=getattr(r,"reference_metrics_status","")=="UNAVAILABLE"
-        return {"Run ID":getattr(r,"run_id",""),"数据来源":getattr(r,"data_source",""),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"场景":getattr(r,"scene","灭屏"),"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"灵敏度(dBm)":"-" if r.sensitivity is None else f"{r.sensitivity:g}","场景差值(dB)":"-" if getattr(r,"scene_delta",None) is None else f"{r.scene_delta:+g}","RSRP(dBm)":"N/A" if ref_unavailable or r.rsrp is None else f"{r.rsrp:g}","RSRQ(dB)":"N/A" if ref_unavailable or r.rsrq is None else f"{r.rsrq:g}","PASS数量":r.pass_count,"FAIL数量":r.fail_count,"总数":r.total_count,"结果":r.result,"备注":r.remark}
+        return {"Run ID":getattr(r,"run_id",""),"数据来源":getattr(r,"data_source",""),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"场景":getattr(r,"scene","灭屏"),"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"灵敏度(dBm)":"-" if r.sensitivity is None else f"{r.sensitivity:g}","场景差值(dB)":"-" if getattr(r,"scene","灭屏")=="灭屏" or getattr(r,"scene_delta",None) is None else f"{r.scene_delta:+g}","RSRP(dBm)":"N/A" if ref_unavailable or r.rsrp is None else f"{r.rsrp:g}","RSRQ(dB)":"N/A" if ref_unavailable or r.rsrq is None else f"{r.rsrq:g}","PASS数量":r.pass_count,"FAIL数量":r.fail_count,"总数":r.total_count,"结果":r.result,"备注":r.remark}
     def _result_background(self,r):
         if r=="PASS": return QColor("#eaf7ea")
         if r in {"FAIL","FAILED"}: return QColor("#fdecec")
