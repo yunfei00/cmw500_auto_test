@@ -26,6 +26,7 @@ class SummaryResult:
     rsrq: float | None = None
     reference_metrics_status: str = ""
     final_bler: float | None = None
+    scene: str = "默认"
 
 
 def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
@@ -118,6 +119,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
                 rsrq=rsrq,
                 reference_metrics_status=ref_status,
                 final_bler=final_bler,
+                scene=str(getattr(final_item, "scene", "默认")),
             )
         )
 
