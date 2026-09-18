@@ -56,7 +56,7 @@ class TestItem:
     rx_level: float
     bw: float | None = None
     loss_db: float = 0.0
-    scene_id: str = "idle"
+    scene_id: str = "default"
 
 
 @dataclass
@@ -91,7 +91,7 @@ class TestResult:
     rsrp: float | None = None
     rsrq: float | None = None
     reference_metrics_status: str = ""
-    scene_id: str = "idle"
+    scene_id: str = "default"
 
 
 @dataclass
