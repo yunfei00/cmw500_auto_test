@@ -27,6 +27,7 @@ class SummaryResult:
     reference_metrics_status: str = ""
     final_bler: float | None = None
     scene: str = "灭屏"
+    scene_delta: float | None = None
 
 
 def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
@@ -125,7 +126,28 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
             )
         )
 
+    _apply_scene_deltas(summary_results)
     return summary_results
+
+
+def _apply_scene_deltas(summary_results: list[SummaryResult]) -> None:
+    baselines: dict[tuple[str, str, str, str, int, str, str, float | None], float] = {}
+    for item in summary_results:
+        if item.scene == "灭屏" and item.sensitivity is not None:
+            key = (item.run_id, item.data_source, item.mode, item.band, item.channel,
+                   item.channel_type, item.test_mode, item.bw)
+            baselines[key] = item.sensitivity
+
+    for item in summary_results:
+        key = (item.run_id, item.data_source, item.mode, item.band, item.channel,
+               item.channel_type, item.test_mode, item.bw)
+        baseline = baselines.get(key)
+        if item.scene == "灭屏" and item.sensitivity is not None:
+            item.scene_delta = 0.0
+        elif baseline is not None and item.sensitivity is not None:
+            item.scene_delta = item.sensitivity - baseline
+        else:
+            item.scene_delta = None
 
 
 def _terminal_attempts(group: list[TestResult]) -> list[TestResult]:
