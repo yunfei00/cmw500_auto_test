@@ -44,6 +44,7 @@ class TestWorker(QObject):
         self.run_metadata = TestRunMetadata(run_id=self.run_id, data_source=self.data_source, instrument_mode=self.instrument.__class__.__name__, config_snapshot=asdict(config))
         self.current_state = TestState.IDLE
         self.last_cell_key: tuple[str, int, float | None] | None = None
+        self.last_scene: str | None = None
         self._instrument_session_started = False
         self._paused = False
         self._stopped = False
@@ -81,6 +82,11 @@ class TestWorker(QObject):
                     self._prepare_cell(item)
                     after_measure_needed = True
                     self.last_cell_key = cell_key
+                scene = str(getattr(item, "scene", "灭屏"))
+                if self.last_scene != scene:
+                    from core.android_dut_control import apply_scene
+                    apply_scene(self, scene)
+                    self.last_scene = scene
                 self.set_state(TestState.MEASURING, "状态切换：MEASURING - 开始灵敏度扫描")
                 if not self._measure_item(item, current, total):
                     outcome = TestState.FAILED
