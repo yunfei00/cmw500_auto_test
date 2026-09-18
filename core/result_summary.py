@@ -26,12 +26,12 @@ class SummaryResult:
     rsrq: float | None = None
     reference_metrics_status: str = ""
     final_bler: float | None = None
-    scene: str = "默认"
+    scene: str = "灭屏"
 
 
 def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
     grouped_results: dict[
-        tuple[str, str, str, str, int, str, str, float | None], list[TestResult]
+        tuple[str, str, str, str, int, str, str, str, float | None], list[TestResult]
     ] = {}
     for result in results:
         key = (
@@ -42,6 +42,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
             result.channel,
             result.channel_type,
             result.test_mode,
+            result.scene,
             result.bw,
         )
         grouped_results.setdefault(key, []).append(result)
@@ -55,6 +56,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
         channel,
         channel_type,
         test_mode,
+        scene,
         bw,
     ), group in grouped_results.items():
         terminal_items = _terminal_attempts(group)
@@ -119,7 +121,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
                 rsrq=rsrq,
                 reference_metrics_status=ref_status,
                 final_bler=final_bler,
-                scene=str(getattr(final_item, "scene", "默认")),
+                scene=scene,
             )
         )
 
