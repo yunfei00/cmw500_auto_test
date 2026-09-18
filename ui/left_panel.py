@@ -514,30 +514,13 @@ class LeftPanel(QScrollArea):
         for index, name in enumerate(scenes):
             checkbox = QCheckBox(name)
             checkbox.setChecked(name == "灭屏")
-            checkbox.toggled.connect(
-                lambda checked, scene=name: self._on_scene_toggled(scene, checked)
-            )
             self.scene_checkboxes[name] = checkbox
             grid.addWidget(checkbox, index // 2, index % 2)
         layout.addLayout(grid)
         return group
 
-    def _on_scene_toggled(self, scene: str, checked: bool) -> None:
-        if not checked:
-            if not any(cb.isChecked() for cb in self.scene_checkboxes.values()):
-                self.scene_checkboxes[scene].setChecked(True)
-            return
-        for name, checkbox in self.scene_checkboxes.items():
-            if name != scene:
-                checkbox.blockSignals(True)
-                checkbox.setChecked(False)
-                checkbox.blockSignals(False)
-
-    def _current_scene(self) -> str:
-        for name, checkbox in self.scene_checkboxes.items():
-            if checkbox.isChecked():
-                return name
-        return "灭屏"
+    def _selected_scenes(self) -> list[str]:
+        return [name for name, checkbox in self.scene_checkboxes.items() if checkbox.isChecked()]
 
     def _create_control_group(self) -> QGroupBox:
         group = QGroupBox("测试控制")
@@ -1195,7 +1178,7 @@ class LeftPanel(QScrollArea):
             custom_channels=[],
             lte_test_items=self._selected_lte_test_items(),
             test_mode=self._current_test_mode(),
-            scene=self._current_scene(),
+            scenes=self._selected_scenes(),
             data=data,
             com_port=com_port,
         )
@@ -1223,6 +1206,9 @@ class LeftPanel(QScrollArea):
                 QMessageBox.warning(self, "参数错误", f"{row.get('band', '')} Excel 线损不能为负数")
                 return False
 
+        if not config.scenes:
+            QMessageBox.warning(self, "提示", "请至少选择一个测试场景")
+            return False
         if not config.selected_bands:
             QMessageBox.warning(self, "提示", "请至少选择一个 Band")
             return False
