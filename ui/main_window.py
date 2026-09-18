@@ -120,8 +120,9 @@ class MainWindow(QMainWindow):
         if self.left_panel.com_port_combo.findText(com_port) >= 0:
             self.left_panel.com_port_combo.setCurrentText(com_port)
 
-        test_mode = str(self.settings.value(self.LTE_TEST_MODE_KEY, "单主")).strip()
+        test_mode = str(self.settings.value(self.LTE_TEST_MODE_KEY, "默认")).strip()
         mode_buttons = {
+            "默认": self.left_panel.default_mode_radio,
             "单主": self.left_panel.single_main_radio,
             "单分": self.left_panel.single_div_radio,
             "主分集": self.left_panel.main_div_radio,
