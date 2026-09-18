@@ -116,7 +116,7 @@ class TestWorker(QObject):
                             scene_failed = True
                             break
                 finally:
-                    if self.last_cell_key is not None:
+                    if scene_id is not None and self.last_cell_key is not None:
                         cell_off_ok = self._safe_cell_off()
                         if not cell_off_ok:
                             unsafe_operation = True
