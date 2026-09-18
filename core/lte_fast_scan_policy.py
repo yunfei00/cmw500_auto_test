@@ -5,6 +5,7 @@ from typing import Any
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 from core.test_states import TestState
 from core.test_worker import TestWorker
+from core.android_dut_control import airplane_cycle as dut_airplane_cycle
 from ui.left_panel import LeftPanel
 
 FAST_PACKET_DEFAULT=100; START_LEVEL_DEFAULT=-90.0; MAX_STEP_DEFAULT=0.3; MIN_STEP_DEFAULT=0.1; BLER_THRESHOLD_DEFAULT=5.0
@@ -60,7 +61,10 @@ def _wait_connected(worker,timeout):
 def _prepare_cell(self,item):
     self.set_state(TestState.CELL_CONFIGURING,f"状态切换：CELL_CONFIGURING - 配置 LTE 小区 {item.band}/{item.channel}"); self._call_lte_prepare_cell(item); self._raise_if_stopped(); self._emit_instrument_warning(); self.log_signal.emit("INFO",f"LTE 小区配置完成：{item.band} 信道 {item.channel} BW={item.bw}")
     for attempt in range(1,ATTACH_ATTEMPTS+1):
-        self.set_state(TestState.CELL_ON,"状态切换：CELL_ON - LTE Cell ON"); self._call_lte_cell_on(item); self._raise_if_stopped(); self._emit_instrument_warning(); self.set_state(TestState.WAITING_ATTACH,"状态切换：WAITING_ATTACH - 等待 UE Attach"); started=time.monotonic(); connected=self._call_wait_for_attach(); elapsed=time.monotonic()-started
+        self.set_state(TestState.CELL_ON,"状态切换：CELL_ON - LTE Cell ON"); self._call_lte_cell_on(item); self._raise_if_stopped(); self._emit_instrument_warning()
+        self.log_signal.emit("INFO","LTE Cell ON 后执行 DUT 飞行模式快速连接")
+        dut_airplane_cycle(self)
+        self.set_state(TestState.WAITING_ATTACH,"状态切换：WAITING_ATTACH - 等待 UE Attach"); started=time.monotonic(); connected=self._call_wait_for_attach(); elapsed=time.monotonic()-started
         if connected: self._raise_if_stopped(); self._emit_instrument_warning(); self.set_state(TestState.ATTACHED,"状态切换：ATTACHED - UE 已连接"); self.log_signal.emit("INFO",f"UE 已连接，耗时 {elapsed:.2f} s"); self._run_before_measure(); return
         self._emit_instrument_warning(); self.log_signal.emit("WARNING",f"UE Attach 超时：已等待 {elapsed:.2f} s（{attempt}/{ATTACH_ATTEMPTS}）")
         if attempt>=ATTACH_ATTEMPTS: break
@@ -72,7 +76,10 @@ def _ensure_connected_for_probe(worker,item,requested_level):
     if _wait_connected(worker,0.0): return level,False
     boost=float(getattr(worker.config,"reconnect_boost_db",RECONNECT_BOOST_DB)); attempts=int(getattr(worker.config,"reconnect_attempts",RECONNECT_ATTEMPTS)); worker.log_signal.emit("WARNING",f"{item.band}/{item.channel} UE 已掉线，开始 +{boost:g} dB 恢复"); recovery=level
     for attempt in range(1,attempts+1):
-        recovery=round(recovery+boost,10); worker.instrument.set_rx_level(worker._instrument_level_for_dut(item,recovery)); worker._raise_if_stopped(); worker._emit_instrument_warning(); started=time.monotonic()
+        recovery=round(recovery+boost,10); worker.instrument.set_rx_level(worker._instrument_level_for_dut(item,recovery)); worker._raise_if_stopped(); worker._emit_instrument_warning()
+        worker.log_signal.emit("WARNING",f"UE 掉线恢复 {attempt}/{attempts}：执行 DUT 飞行模式循环")
+        dut_airplane_cycle(worker)
+        started=time.monotonic()
         if _wait_connected(worker,10.0): worker.log_signal.emit("INFO",f"UE 已恢复连接，耗时 {time.monotonic()-started:.2f} s"); return recovery,True
         worker.log_signal.emit("WARNING",f"UE 重连超时：已等待 {time.monotonic()-started:.2f} s（{attempt}/{attempts}）")
     raise RuntimeError(f"UE 掉线后连续 {attempts} 次 +{boost:g} dB 仍无法恢复连接")
