@@ -539,13 +539,21 @@ class LeftPanel(QScrollArea):
             ("compass", "指南针"),
             ("ambient_light", "环境光"),
         ]
-        default_scenes = {"idle", "music", "video", "game_heavy"}
+        recommended_scenes = {"idle", "music", "video", "game_heavy"}
         for index, (scene_id, title) in enumerate(scene_defs):
             checkbox = QCheckBox(title)
-            checkbox.setChecked(scene_id in default_scenes)
             self.scene_checkboxes[scene_id] = checkbox
             grid.addWidget(checkbox, index // 2, index % 2)
         layout.addLayout(grid)
+
+        recommended_button = QPushButton("选择推荐组合：Idle + Music + Video + Game Heavy")
+        recommended_button.clicked.connect(
+            lambda: [
+                checkbox.setChecked(scene_id in recommended_scenes)
+                for scene_id, checkbox in self.scene_checkboxes.items()
+            ]
+        )
+        layout.addWidget(recommended_button)
 
         form = QFormLayout()
         self.scene_settle_spin.setRange(0.0, 60.0)
