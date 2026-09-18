@@ -98,14 +98,21 @@ def _collect_final_reference_metrics(worker):
     if result is None or bool(getattr(worker.instrument,"is_simulation",False)): return
     query=getattr(worker.instrument,"query",None)
     if not callable(query): return
-    try:
-        result.rsrp=_parse_numeric(query(RSRP_QUERY))
-        result.rsrq=_parse_numeric(query(RSRQ_QUERY))
-        result.reference_metrics_status="AVAILABLE"
-        worker.log_signal.emit("INFO",f"最终参考值：RSRP={result.rsrp:g} dBm，RSRQ={result.rsrq:g} dB")
-    except Exception as exc:
-        result.rsrp=None; result.rsrq=None; result.reference_metrics_status="UNAVAILABLE"
-        worker.log_signal.emit("WARNING",f"最终 RSRP/RSRQ 查询失败（不影响 BLER 灵敏度结果）：{exc}")
+    attempts=3
+    for attempt in range(1,attempts+1):
+        if attempt>1:
+            worker.log_signal.emit("INFO",f"RSRP/RSRQ 等待稳定后重试 {attempt}/{attempts}")
+            time.sleep(0.5)
+        try:
+            rsrp=_parse_numeric(query(RSRP_QUERY))
+            rsrq=_parse_numeric(query(RSRQ_QUERY))
+            result.rsrp=rsrp; result.rsrq=rsrq; result.reference_metrics_status="AVAILABLE"
+            worker.log_signal.emit("INFO",f"最终参考值：RSRP={rsrp:g} dBm，RSRQ={rsrq:g} dB（{attempt}/{attempts}）")
+            return
+        except Exception as exc:
+            worker.log_signal.emit("WARNING",f"RSRP/RSRQ 查询失败 {attempt}/{attempts}：{exc}")
+    result.rsrp=None; result.rsrq=None; result.reference_metrics_status="UNAVAILABLE"
+    worker.log_signal.emit("WARNING","RSRP/RSRQ 连续 3 次查询失败，保留 N/A；不影响 BLER 灵敏度结果")
 
 def _measure_with_packets(worker,item,level,phase,current,total,packet_count):
     op=worker.config.packet_count; oretry=worker.config.retry_count; worker.config.packet_count=int(packet_count); worker.config.retry_count=0
