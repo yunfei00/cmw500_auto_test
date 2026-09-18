@@ -15,6 +15,7 @@ from core.models import LteTestConfig, TestItem, TestResult, TestRunMetadata, lo
 from core.result_judge import judge_bler
 from core.test_plan import generate_lte_test_plan
 from core.test_states import TestState
+from devices.adb_client import AdbClient
 from devices.instrument_base import InstrumentBase
 
 
@@ -49,6 +50,8 @@ class TestWorker(QObject):
         self._stopped = False
         self._cleanup_started = False
         self._mutex = QMutex()
+        self.adb_client = AdbClient()
+        self.active_scene_id: str | None = None
 
     def run(self) -> None:
         outcome = TestState.FAILED
@@ -61,8 +64,16 @@ class TestWorker(QObject):
             self.log_signal.emit("INFO", "开始生成 LTE 测试计划")
             self.test_plan = generate_lte_test_plan(self.config, self.lte_channel_manager)
             self._validate_test_plan()
-            total = len(self.test_plan)
-            self.log_signal.emit("INFO", f"共生成 {total} 个信道测试项")
+
+            scene_ids = self._scene_sequence()
+            execution_scenes: list[str | None] = scene_ids if scene_ids else [None]
+            total = len(self.test_plan) * len(execution_scenes)
+            self.log_signal.emit(
+                "INFO",
+                f"共生成 {len(self.test_plan)} 个信道测试项，"
+                f"场景数={len(execution_scenes)}，总执行项={total}",
+            )
+            self._prepare_scene_device(scene_ids)
             self._prepare_instrument_for_run()
             instrument_type = self.instrument.__class__.__name__
             self.log_signal.emit("INFO", f"当前使用仪表类型：{instrument_type}")
@@ -71,22 +82,58 @@ class TestWorker(QObject):
             self._instrument_session_started = True
             self._log_real_instrument_template_state()
             self._configure_lte_run()
-            for current, item in enumerate(self.test_plan, start=1):
+
+            for scene_index, scene_id in enumerate(execution_scenes):
                 self._cooperate()
-                cell_key = (item.band, item.channel, item.bw)
-                if self.last_cell_key != cell_key:
-                    if self.last_cell_key is not None and not self._safe_cell_off():
-                        unsafe_operation = True
-                        raise _UnsafeOperationError("切换信道前 Cell OFF 失败")
-                    self._prepare_cell(item)
-                    after_measure_needed = True
-                    self.last_cell_key = cell_key
-                self.set_state(TestState.MEASURING, "状态切换：MEASURING - 开始灵敏度扫描")
-                if not self._measure_item(item, current, total):
+                cell_off_ok = True
+                scene_cleanup_ok = True
+                scene_failed = False
+                try:
+                    if scene_id is not None:
+                        self._start_scene(scene_id)
+
+                    for local_index, base_item in enumerate(self.test_plan, start=1):
+                        self._cooperate()
+                        current = scene_index * len(self.test_plan) + local_index
+                        item = replace(
+                            base_item,
+                            index=current,
+                            scene_id=scene_id or "default",
+                        )
+                        cell_key = (item.band, item.channel, item.bw)
+                        if self.last_cell_key != cell_key:
+                            if self.last_cell_key is not None and not self._safe_cell_off():
+                                unsafe_operation = True
+                                raise _UnsafeOperationError("切换信道前 Cell OFF 失败")
+                            self._prepare_cell(item)
+                            after_measure_needed = True
+                            self.last_cell_key = cell_key
+                        self.set_state(
+                            TestState.MEASURING,
+                            "状态切换：MEASURING - 开始灵敏度扫描",
+                        )
+                        if not self._measure_item(item, current, total):
+                            scene_failed = True
+                            break
+                finally:
+                    if scene_id is not None and self.last_cell_key is not None:
+                        cell_off_ok = self._safe_cell_off()
+                        if not cell_off_ok:
+                            unsafe_operation = True
+                        self.last_cell_key = None
+                    if scene_id is not None:
+                        scene_cleanup_ok = self._stop_scene(scene_id)
+
+                if not cell_off_ok:
+                    raise _UnsafeOperationError("切换场景前 Cell OFF 失败")
+                if not scene_cleanup_ok:
+                    raise RuntimeError(f"场景 {scene_id} 停止确认失败")
+                if scene_failed:
                     outcome = TestState.FAILED
                     break
             else:
                 outcome = TestState.COMPLETED
+
             if self._is_stopped():
                 outcome = TestState.STOPPED
         except _StopRequested:
@@ -115,6 +162,8 @@ class TestWorker(QObject):
             else:
                 cleanup_safe = True
             self._disconnect_instrument_session()
+            self._stop_active_scene_best_effort()
+
             if not cleanup_safe or unsafe_operation:
                 final_state = TestState.FAILED_UNSAFE
                 final_message = "测试结束，但仪表安全清理未确认完成"
@@ -128,11 +177,120 @@ class TestWorker(QObject):
                 final_state = TestState.FAILED
                 final_message = "测试失败"
             self.set_state(final_state, f"状态切换：{final_state.value} - {final_message}")
-            self.log_signal.emit("ERROR" if final_state in {TestState.FAILED, TestState.FAILED_UNSAFE} else "INFO", final_message)
+            self.log_signal.emit(
+                "ERROR" if final_state in {TestState.FAILED, TestState.FAILED_UNSAFE} else "INFO",
+                final_message,
+            )
             self.run_metadata.status = final_state.value
             self.run_metadata.end_time = local_now_iso()
             self.run_metadata.data_source = self.data_source
             self.finished_signal.emit()
+
+    def _scene_sequence(self) -> list[str]:
+        supported = {
+            "idle",
+            "motor",
+            "music",
+            "video",
+            "dynamic_wallpaper",
+            "game_heavy",
+            "flashlight",
+            "recorder",
+            "mirror",
+            "compass",
+            "ambient_light",
+            "white_screen",
+            "front_camera",
+            "rear_camera",
+        }
+        scenes: list[str] = []
+        for raw_scene in self.config.scene_ids:
+            scene = str(raw_scene).strip().lower()
+            if not scene or scene in scenes:
+                continue
+            if scene not in supported:
+                raise ValueError(f"不支持的场景：{scene}")
+            scenes.append(scene)
+        return scenes
+
+    def _prepare_scene_device(self, scene_ids: list[str]) -> None:
+        if not scene_ids:
+            return
+        device_id = self.config.scene_device_id.strip()
+        if not device_id:
+            raise ValueError("已选择场景测试，但未选择 ADB 设备")
+
+        devices = self.adb_client.list_devices()
+        if device_id not in devices:
+            detail = self.adb_client.last_error or f"当前设备：{devices}"
+            raise RuntimeError(f"ADB 设备不可用：{device_id}；{detail}")
+
+        non_idle = [scene for scene in scene_ids if scene != "idle"]
+        if non_idle:
+            success, message = self.adb_client.grant_scene_permissions(
+                device_id,
+                package_name=self.config.scene_package_name,
+            )
+            if not success:
+                raise RuntimeError(f"场景 App 权限初始化失败：{message}")
+            self.log_signal.emit("INFO", f"场景 App 权限初始化完成：{message}")
+
+    def _start_scene(self, scene_id: str) -> None:
+        device_id = self.config.scene_device_id.strip()
+        package_name = self.config.scene_package_name.strip()
+        self.active_scene_id = scene_id
+        self.log_signal.emit("INFO", f"准备场景：{scene_id}")
+
+        if scene_id == "idle":
+            success, message = self.adb_client.stop_scene(
+                device_id,
+                package_name=package_name,
+            )
+        else:
+            success, message = self.adb_client.start_scene(
+                device_id,
+                scene_id,
+                package_name=package_name,
+                duration=int(self.config.scene_duration),
+                particles=int(self.config.scene_particles),
+                cpu_threads=int(self.config.scene_cpu_threads),
+                audio=bool(self.config.scene_audio),
+                vibration=bool(self.config.scene_vibration),
+            )
+        if not success:
+            raise RuntimeError(f"场景 {scene_id} 启动失败：{message}")
+        self.log_signal.emit("INFO", f"场景已就绪：{scene_id}；{message}")
+
+        settle = float(self.config.scene_settle_time)
+        if settle > 0 and not self._interruptible_sleep(settle):
+            raise _StopRequested()
+
+    def _stop_scene(self, scene_id: str) -> bool:
+        device_id = self.config.scene_device_id.strip()
+        package_name = self.config.scene_package_name.strip()
+        if not device_id:
+            self.active_scene_id = None
+            return True
+        success, message = self.adb_client.stop_scene(
+            device_id,
+            package_name=package_name,
+        )
+        self.log_signal.emit(
+            "INFO" if success else "ERROR",
+            f"停止场景 {scene_id}：{message}",
+        )
+        self.active_scene_id = None
+        return success
+
+    def _stop_active_scene_best_effort(self) -> None:
+        scene_id = self.active_scene_id
+        if not scene_id:
+            return
+        try:
+            self._stop_scene(scene_id)
+        except Exception as exc:
+            self.log_signal.emit("WARNING", f"测试收尾时停止场景失败：{exc}")
+            self.active_scene_id = None
 
     def _disconnect_instrument_session(self) -> None:
         if not self._instrument_session_started: return
@@ -157,6 +315,16 @@ class TestWorker(QObject):
         if self.config.retry_count < 0: raise ValueError("retry_count 不能小于 0")
         if self.config.settle_time < 0: raise ValueError("settle_time 不能小于 0")
         if int(self.config.com_port) not in {1,2,3,4}: raise ValueError("com_port 仅支持 COM1..COM4")
+        if not math.isfinite(float(self.config.scene_settle_time)) or self.config.scene_settle_time < 0:
+            raise ValueError("scene_settle_time 必须是非负有限数值")
+        if int(self.config.scene_duration) < 0:
+            raise ValueError("scene_duration 不能小于 0")
+        if int(self.config.scene_particles) < 20:
+            raise ValueError("scene_particles 不能小于 20")
+        if int(self.config.scene_cpu_threads) < 0:
+            raise ValueError("scene_cpu_threads 不能小于 0")
+        if self.config.scene_ids and not self.config.scene_package_name.strip():
+            raise ValueError("场景 App 包名不能为空")
         judge_bler(0.0, float(self.config.bler_threshold))
 
     def _validate_test_plan(self) -> None:
@@ -303,11 +471,11 @@ class TestWorker(QObject):
             self.log_signal.emit("WARNING",str(warning))
             try: self.instrument.last_warning=""
             except Exception: pass
-    def _emit_summary(self,item:TestItem,current:int,total:int,phase:str,attempt:int)->None: self.summary_signal.emit({"run_id":self.run_id,"data_source":self.data_source,"scan_phase":phase,"attempt":attempt,"current_mode":"LTE","current_band":item.band,"current_channel":str(item.channel),"current_level":f"{item.rx_level:g} dBm","progress":f"{current}/{total}"})
+    def _emit_summary(self,item:TestItem,current:int,total:int,phase:str,attempt:int)->None: self.summary_signal.emit({"run_id":self.run_id,"data_source":self.data_source,"scan_phase":phase,"attempt":attempt,"current_mode":"LTE","current_band":item.band,"current_channel":str(item.channel),"current_level":f"{item.rx_level:g} dBm","current_scene":getattr(item,"scene_id","default"),"progress":f"{current}/{total}"})
     def _build_result(self,item:TestItem,bler:float|None,result:str,status:str,*,attempt:int=1,phase:str="COARSE",instrument_level:float|None=None,error_message:str="")->TestResult:
         total_loss=float(self.config.cable_loss)+float(item.loss_db)
         if instrument_level is None: instrument_level=self._instrument_level_for_dut(item,item.rx_level)
-        return TestResult(index=item.index,mode=item.mode,band=item.band,channel=item.channel,channel_type=item.channel_type,test_mode=item.test_mode,rx_level=item.rx_level,metric_type="BLER",metric_value=bler,result=result,status=status,run_id=self.run_id,data_source=self.data_source,bw=item.bw,global_cable_loss=float(self.config.cable_loss),channel_loss=float(item.loss_db),total_loss=total_loss,instrument_level=instrument_level,packet_count=int(self.config.packet_count),bler_threshold=float(self.config.bler_threshold),sensitivity_upper=float(self.config.sensitivity_upper),attempt=attempt,scan_phase=phase,error_message=error_message)
+        return TestResult(index=item.index,mode=item.mode,band=item.band,channel=item.channel,channel_type=item.channel_type,test_mode=item.test_mode,rx_level=item.rx_level,metric_type="BLER",metric_value=bler,result=result,status=status,run_id=self.run_id,data_source=self.data_source,bw=item.bw,global_cable_loss=float(self.config.cable_loss),channel_loss=float(item.loss_db),total_loss=total_loss,instrument_level=instrument_level,packet_count=int(self.config.packet_count),bler_threshold=float(self.config.bler_threshold),sensitivity_upper=float(self.config.sensitivity_upper),attempt=attempt,scan_phase=phase,error_message=error_message,scene_id=getattr(item,"scene_id","default"))
     def _resolve_data_source(self)->str:
         for attribute in ("last_measurement_source","data_source"):
             value=getattr(self.instrument,attribute,"")

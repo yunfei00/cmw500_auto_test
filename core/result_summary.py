@@ -26,11 +26,13 @@ class SummaryResult:
     rsrq: float | None = None
     reference_metrics_status: str = ""
     final_bler: float | None = None
+    scene_id: str = "default"
+    delta_vs_idle: float | None = None
 
 
 def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
     grouped_results: dict[
-        tuple[str, str, str, str, int, str, str, float | None], list[TestResult]
+        tuple[str, str, str, str, int, str, str, float | None, str], list[TestResult]
     ] = {}
     for result in results:
         key = (
@@ -42,6 +44,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
             result.channel_type,
             result.test_mode,
             result.bw,
+            getattr(result, "scene_id", "default") or "default",
         )
         grouped_results.setdefault(key, []).append(result)
 
@@ -55,6 +58,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
         channel_type,
         test_mode,
         bw,
+        scene_id,
     ), group in grouped_results.items():
         terminal_items = _terminal_attempts(group)
         fine_passes = [
@@ -69,7 +73,9 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
         if fine_passes:
             final_item = min(fine_passes, key=lambda item: item.rx_level)
             sensitivity = final_item.rx_level
-            final_bler = final_item.metric_value if final_item.metric_type.upper() == "BLER" else None
+            final_bler = (
+                final_item.metric_value if final_item.metric_type.upper() == "BLER" else None
+            )
             ref_status = getattr(final_item, "reference_metrics_status", "")
             remark = f"Sensitivity = {sensitivity:g} dBm"
             if ref_status == "UNAVAILABLE":
@@ -79,7 +85,8 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
             rsrq = getattr(final_item, "rsrq", None)
         else:
             failed_markers = [
-                item for item in terminal_items
+                item
+                for item in terminal_items
                 if item.scan_phase.upper() == "CHANNEL"
                 and item.result.upper() in {"ERROR", "FAILED"}
             ]
@@ -118,10 +125,53 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
                 rsrq=rsrq,
                 reference_metrics_status=ref_status,
                 final_bler=final_bler,
+                scene_id=scene_id,
             )
         )
 
+    _apply_idle_deltas(summary_results)
     return summary_results
+
+
+def _apply_idle_deltas(results: list[SummaryResult]) -> None:
+    idle_map: dict[
+        tuple[str, str, str, str, int, str, str, float | None], float
+    ] = {}
+    for item in results:
+        if item.scene_id != "idle" or item.sensitivity is None:
+            continue
+        key = (
+            item.run_id,
+            item.data_source,
+            item.mode,
+            item.band,
+            item.channel,
+            item.channel_type,
+            item.test_mode,
+            item.bw,
+        )
+        idle_map[key] = float(item.sensitivity)
+
+    for item in results:
+        if item.scene_id == "idle":
+            item.delta_vs_idle = 0.0 if item.sensitivity is not None else None
+            continue
+        if item.sensitivity is None:
+            item.delta_vs_idle = None
+            continue
+        key = (
+            item.run_id,
+            item.data_source,
+            item.mode,
+            item.band,
+            item.channel,
+            item.channel_type,
+            item.test_mode,
+            item.bw,
+        )
+        baseline = idle_map.get(key)
+        if baseline is not None:
+            item.delta_vs_idle = float(item.sensitivity) - baseline
 
 
 def _terminal_attempts(group: list[TestResult]) -> list[TestResult]:

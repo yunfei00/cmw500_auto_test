@@ -120,6 +120,14 @@ class LeftPanel(QScrollArea):
         self.device_combo = QComboBox()
         self.app_path_edit = QLineEdit()
         self.package_name_edit = QLineEdit()
+        self.package_name_edit.setText("com.yunfei.autotestscene")
+        self.scene_checkboxes: dict[str, QCheckBox] = {}
+        self.scene_settle_spin = QDoubleSpinBox()
+        self.scene_duration_spin = QSpinBox()
+        self.scene_particles_spin = QSpinBox()
+        self.scene_cpu_threads_spin = QSpinBox()
+        self.scene_audio_checkbox = QCheckBox("高负载场景启用音频")
+        self.scene_vibration_checkbox = QCheckBox("高负载场景启用振动")
         self.operator_edit = QLineEdit()
         self.dut_serial_edit = QLineEdit()
         self.com_port_combo = QComboBox()
@@ -507,9 +515,70 @@ class LeftPanel(QScrollArea):
         layout.setContentsMargins(8, 14, 8, 8)
         layout.setSpacing(8)
 
-        label = QLabel("LTE 灵敏度扫描（粗扫 + 细扫 + 失败重试）")
+        label = QLabel(
+            "可一次执行多个手机场景。未勾选任何场景时保持原有 LTE 灵敏度测试流程；"
+            "勾选场景后将通过 ADB 自动启动/停止 AutoTestSceneApp。"
+        )
         label.setWordWrap(True)
         layout.addWidget(label)
+
+        grid = QGridLayout()
+        scene_defs = [
+            ("idle", "Idle 空闲基线"),
+            ("music", "Music 音乐"),
+            ("video", "Video 视频"),
+            ("game_heavy", "Game Heavy 高负载"),
+            ("motor", "马达"),
+            ("flashlight", "手电筒"),
+            ("white_screen", "白屏"),
+            ("front_camera", "前置摄像头"),
+            ("rear_camera", "后置摄像头"),
+            ("dynamic_wallpaper", "动态壁纸"),
+            ("recorder", "录音"),
+            ("mirror", "镜子"),
+            ("compass", "指南针"),
+            ("ambient_light", "环境光"),
+        ]
+        recommended_scenes = {"idle", "music", "video", "game_heavy"}
+        for index, (scene_id, title) in enumerate(scene_defs):
+            checkbox = QCheckBox(title)
+            self.scene_checkboxes[scene_id] = checkbox
+            grid.addWidget(checkbox, index // 2, index % 2)
+        layout.addLayout(grid)
+
+        recommended_button = QPushButton("选择推荐组合：Idle + Music + Video + Game Heavy")
+        recommended_button.clicked.connect(
+            lambda: [
+                checkbox.setChecked(scene_id in recommended_scenes)
+                for scene_id, checkbox in self.scene_checkboxes.items()
+            ]
+        )
+        layout.addWidget(recommended_button)
+
+        form = QFormLayout()
+        self.scene_settle_spin.setRange(0.0, 60.0)
+        self.scene_settle_spin.setDecimals(1)
+        self.scene_settle_spin.setSingleStep(0.5)
+        self.scene_settle_spin.setValue(3.0)
+        self.scene_settle_spin.setSuffix(" s")
+
+        self.scene_duration_spin.setRange(0, 86400)
+        self.scene_duration_spin.setValue(0)
+        self.scene_duration_spin.setSuffix(" s")
+        self.scene_duration_spin.setToolTip("0 表示由 PC 测试流程主动停止；大于 0 时 App watchdog 到时自动停止")
+
+        self.scene_particles_spin.setRange(20, 1000)
+        self.scene_particles_spin.setValue(250)
+        self.scene_cpu_threads_spin.setRange(0, 8)
+        self.scene_cpu_threads_spin.setValue(2)
+
+        form.addRow("场景稳定等待：", self.scene_settle_spin)
+        form.addRow("App watchdog：", self.scene_duration_spin)
+        form.addRow("高负载粒子数：", self.scene_particles_spin)
+        form.addRow("高负载 CPU 线程：", self.scene_cpu_threads_spin)
+        layout.addLayout(form)
+        layout.addWidget(self.scene_audio_checkbox)
+        layout.addWidget(self.scene_vibration_checkbox)
         return group
 
     def _create_control_group(self) -> QGroupBox:
@@ -1170,6 +1239,20 @@ class LeftPanel(QScrollArea):
             test_mode=self._current_test_mode(),
             data=data,
             com_port=com_port,
+            scene_ids=[
+                scene_id
+                for scene_id, checkbox in self.scene_checkboxes.items()
+                if checkbox.isChecked()
+            ],
+            scene_device_id=self.device_combo.currentText().strip(),
+            scene_package_name=self.package_name_edit.text().strip()
+            or "com.yunfei.autotestscene",
+            scene_settle_time=self.scene_settle_spin.value(),
+            scene_duration=self.scene_duration_spin.value(),
+            scene_particles=self.scene_particles_spin.value(),
+            scene_cpu_threads=self.scene_cpu_threads_spin.value(),
+            scene_audio=self.scene_audio_checkbox.isChecked(),
+            scene_vibration=self.scene_vibration_checkbox.isChecked(),
         )
 
     def _validate_lte_channel_config(self, config: LteTestConfig) -> bool:
@@ -1202,6 +1285,21 @@ class LeftPanel(QScrollArea):
         if not self.lte_channel_manager.has_config():
             QMessageBox.warning(self, "提示", "LTE 信道配置未加载，请检查配置文件")
             return False
+
+        if config.scene_ids:
+            if not config.scene_device_id:
+                QMessageBox.warning(
+                    self,
+                    "场景测试",
+                    "已勾选手机场景，请先在“手机设置”中刷新并选择 ADB 设备。",
+                )
+                return False
+            if not re.fullmatch(
+                r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+",
+                config.scene_package_name,
+            ):
+                QMessageBox.warning(self, "场景测试", "场景 App 包名格式不正确")
+                return False
 
         for band in config.selected_bands:
             try:
