@@ -10,10 +10,8 @@ from ui.left_panel import LeftPanel
 
 FAST_PACKET_DEFAULT=100; START_LEVEL_DEFAULT=-90.0; MAX_STEP_DEFAULT=0.3; MIN_STEP_DEFAULT=0.1; BLER_THRESHOLD_DEFAULT=5.0
 FAST_CONFIRM_TRIGGER=1.2; CONFIRM_DIRECT_MIN=4.8; CONFIRM_DIRECT_MAX=5.0
-RECONNECT_BOOST_DB=5.0; RECONNECT_ATTEMPTS=3; ATTACH_ATTEMPTS=3; REFERENCE_METRIC_ATTEMPTS=3
+RECONNECT_BOOST_DB=5.0; RECONNECT_ATTEMPTS=3; ATTACH_ATTEMPTS=3
 FULL_CELL_BW_POWER_QUERY="SENSe:LTE:SIGN:DL:PCC:FCPOWer?"
-RSRP_QUERY="SENSe:LTE:SIGN:UEReport:PCC:RSRP?"
-RSRQ_QUERY="SENSe:LTE:SIGN:UEReport:PCC:RSRQ?"
 PUSCH_OPEN_LOOP_COMMAND="CONFigure:LTE:SIGN:UL:PCC:PUSCh:OLNPower"; PUSCH_CLOSED_LOOP_COMMAND="CONFigure:LTE:SIGN:UL:PCC:PUSCh:TPC:CLTPower"; SETTINGS_PREFIX="lte/"
 _original_create_lte_instrument_group=LeftPanel._create_lte_instrument_group; _original_create_lte_channel_group=LeftPanel._create_lte_channel_group; _original_create_lte_band_group=LeftPanel._create_lte_band_group; _original_collect_lte_config=LeftPanel.collect_lte_config; _original_measure_level=TestWorker._measure_level; _original_build_result=TestWorker._build_result; _original_configure_lte_run=TestWorker._configure_lte_run
 
@@ -94,20 +92,6 @@ def _query_full_cell_bw_power(worker):
     if not callable(query): return None
     try: return _parse_numeric(query(FULL_CELL_BW_POWER_QUERY))
     except Exception as exc: worker.log_signal.emit("WARNING",f"Full Cell BW Power 查询失败：{exc}"); return None
-def _collect_reference_metrics(worker,item,level):
-    result=getattr(worker,"_last_built_test_result",None)
-    if result is None: return
-    if bool(getattr(worker.instrument,"is_simulation",False)):
-        result.reference_metrics_status="UNAVAILABLE"; worker.row_signal.emit(result); return
-    query=getattr(worker.instrument,"query",None)
-    if not callable(query): result.reference_metrics_status="UNAVAILABLE"; worker.row_signal.emit(result); return
-    for attempt in range(1,REFERENCE_METRIC_ATTEMPTS+1):
-        try:
-            rsrp=_parse_numeric(query(RSRP_QUERY)); worker._raise_if_stopped(); rsrq=_parse_numeric(query(RSRQ_QUERY)); worker._raise_if_stopped(); result.rsrp=rsrp; result.rsrq=rsrq; result.reference_metrics_status="OK"; worker.log_signal.emit("INFO",f"{item.band}/{item.channel} 最终参考值：RSRP={rsrp:g} dBm，RSRQ={rsrq:g} dB"); worker.row_signal.emit(result); return
-        except Exception as exc:
-            worker.log_signal.emit("WARNING",f"{item.band}/{item.channel} RSRP/RSRQ 获取失败（{attempt}/{REFERENCE_METRIC_ATTEMPTS}）：{exc}")
-            if attempt<REFERENCE_METRIC_ATTEMPTS: time.sleep(0.3)
-    result.reference_metrics_status="UNAVAILABLE"; worker.log_signal.emit("WARNING",f"{item.band}/{item.channel} RSRP/RSRQ 连续 {REFERENCE_METRIC_ATTEMPTS} 次获取失败，记录为 N/A；不影响灵敏度结果"); worker.row_signal.emit(result)
 def _measure_with_packets(worker,item,level,phase,current,total,packet_count):
     op=worker.config.packet_count; oretry=worker.config.retry_count; worker.config.packet_count=int(packet_count); worker.config.retry_count=0
     try:
@@ -137,14 +121,14 @@ def _scan_item(self,item,current,total):
             result=getattr(self,"_last_built_test_result",None)
             if result is not None:
                 result.scan_phase="FINE"; result.result="PASS"; result.status="PASS"; self.row_signal.emit(result)
-            _collect_reference_metrics(self,item,level); return
+            return
         if confirm_bler<float(self.config.bler_threshold): level=round(level-max_step,10); continue
         fail_level=level; fine=round(fail_level+min_step,10)
         while True:
             fine,recovered=_ensure_connected_for_probe(self,item,fine)
             if recovered: level=fine; break
             if _measure_with_packets(self,item,fine,"FINE",current,total,formal):
-                self.log_signal.emit("INFO",f"Sensitivity 边界：PASS={fine:g} dBm，FAIL={fail_level:g} dBm"); _collect_reference_metrics(self,item,fine); return
+                self.log_signal.emit("INFO",f"Sensitivity 边界：PASS={fine:g} dBm，FAIL={fail_level:g} dBm"); return
             fail_level=fine; fine=round(fine+min_step,10)
 def apply_lte_fast_scan_policy():
     if getattr(TestWorker,"_lte_fast_scan_policy_applied",False): return
