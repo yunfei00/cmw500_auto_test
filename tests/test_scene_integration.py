@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.models import TestResult
+from core.models import TestResult as Result
 from core.result_summary import build_lte_summary
 from devices.adb_client import AdbClient
 
@@ -24,8 +24,8 @@ class RecordingAdbClient(AdbClient):
         return True, "OK"
 
 
-def _result(scene_id: str, sensitivity: float) -> TestResult:
-    return TestResult(
+def _result(scene_id: str, sensitivity: float) -> Result:
+    return Result(
         index=1,
         mode="LTE",
         band="B3",
