@@ -477,12 +477,13 @@ class LeftPanel(QScrollArea):
 
         mode_layout = QHBoxLayout()
         mode_layout.addWidget(QLabel("测试模式："))
+        self.default_mode_radio = QRadioButton("默认")
         self.single_main_radio = QRadioButton("单主")
         self.single_div_radio = QRadioButton("单分")
         self.main_div_radio = QRadioButton("主分集")
-        self.single_main_radio.setChecked(True)
+        self.default_mode_radio.setChecked(True)
         self.mode_group = QButtonGroup(self)
-        for radio in (self.single_main_radio, self.single_div_radio, self.main_div_radio):
+        for radio in (self.default_mode_radio, self.single_main_radio, self.single_div_radio, self.main_div_radio):
             self.mode_group.addButton(radio)
             mode_layout.addWidget(radio)
         mode_layout.addStretch(1)
@@ -507,9 +508,14 @@ class LeftPanel(QScrollArea):
         layout.setContentsMargins(8, 14, 8, 8)
         layout.setSpacing(8)
 
-        label = QLabel("LTE 灵敏度扫描（粗扫 + 细扫 + 失败重试）")
-        label.setWordWrap(True)
-        layout.addWidget(label)
+        form = QFormLayout()
+        self.scene_combo = QComboBox()
+        self.scene_combo.addItems(["默认", "灭屏", "亮屏", "音乐", "前置主摄", "后置主摄", "马达", "表表"])
+        form.addRow("场景：", self.scene_combo)
+        hint = QLabel("当前已实现：默认、灭屏、亮屏；其他场景暂为占位")
+        hint.setWordWrap(True)
+        layout.addLayout(form)
+        layout.addWidget(hint)
         return group
 
     def _create_control_group(self) -> QGroupBox:
@@ -1086,7 +1092,7 @@ class LeftPanel(QScrollArea):
 
     def _current_test_mode(self) -> str:
         checked = self.mode_group.checkedButton()
-        return checked.text() if checked else "单主"
+        return checked.text() if checked else "默认"
 
     def _selected_lte_test_items(self) -> list[str]:
         return [
@@ -1168,6 +1174,7 @@ class LeftPanel(QScrollArea):
             custom_channels=[],
             lte_test_items=self._selected_lte_test_items(),
             test_mode=self._current_test_mode(),
+            scene=self.scene_combo.currentText(),
             data=data,
             com_port=com_port,
         )
