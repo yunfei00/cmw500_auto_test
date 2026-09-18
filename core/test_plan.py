@@ -12,9 +12,9 @@ def generate_lte_test_plan(
         return []
 
     bands = config.selected_bands or []
+    scenes = config.scenes or ["灭屏"]
     items: list[TestItem] = []
     index = 1
-    scenes = config.scenes or ["灭屏"]
 
     if config.data:
         for row in config.data:
@@ -26,43 +26,43 @@ def generate_lte_test_plan(
             channel = int(channel_raw)
             loss_db = _row_loss_db(row, band, lte_channel_manager)
             for scene in scenes:
-                for scene in scenes:
-                    items.append(
-                        TestItem(
-                    index=index,
-                    mode="LTE",
-                    band=band,
-                    channel=channel,
-                    channel_type=str(row.get("desc", "")) or "固定信道",
-                    test_mode=config.test_mode,
-                    rx_level=config.start_level,
-                    bw=_parse_optional_float(row.get("bw")),
-                    loss_db=loss_db,
-                    scene=scene,
+                items.append(
+                    TestItem(
+                        index=index,
+                        mode="LTE",
+                        band=band,
+                        channel=channel,
+                        channel_type=str(row.get("desc", "")) or "固定信道",
+                        test_mode=config.test_mode,
+                        rx_level=config.start_level,
+                        bw=_parse_optional_float(row.get("bw")),
+                        loss_db=loss_db,
                         scene=scene,
-                        )
                     )
-                    index += 1
+                )
+                index += 1
         return items
 
     for band in bands:
-        selections = lte_channel_manager.get_band_test_selections(band, config.lte_test_items)
+        selections = lte_channel_manager.get_band_test_selections(
+            band, config.lte_test_items
+        )
         for test_item_name, selection in selections:
             channel_type = _channel_type_label(test_item_name, selection)
             for channel in selection.channels:
                 for scene in scenes:
                     items.append(
                         TestItem(
-                        index=index,
-                        mode="LTE",
-                        band=band,
-                        channel=channel,
-                        channel_type=channel_type,
-                        test_mode=config.test_mode,
-                        rx_level=config.start_level,
-                        bw=selection.bw,
-                        loss_db=selection.loss_db,
-                        scene=scene,
+                            index=index,
+                            mode="LTE",
+                            band=band,
+                            channel=channel,
+                            channel_type=channel_type,
+                            test_mode=config.test_mode,
+                            rx_level=config.start_level,
+                            bw=selection.bw,
+                            loss_db=selection.loss_db,
+                            scene=scene,
                         )
                     )
                     index += 1
