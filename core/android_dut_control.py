@@ -35,7 +35,7 @@ def apply_scene(worker: Any, scene: str) -> None:
     if normalized == "亮屏":
         worker.log_signal.emit("INFO", "DUT 场景：亮屏")
         dut.screen_on()
-        dut.adb.shell("input keyevent KEYCODE_HOME")
+        dut.home()
         worker.log_signal.emit("INFO", "DUT 亮屏后已按 Home 键进入主页")
         return
     worker.log_signal.emit("WARNING", f"DUT 场景“{normalized}”暂未实现，本次不修改手机状态")
