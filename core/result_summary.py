@@ -26,7 +26,7 @@ class SummaryResult:
     rsrq: float | None = None
     reference_metrics_status: str = ""
     final_bler: float | None = None
-    scene_id: str = "idle"
+    scene_id: str = "default"
     delta_vs_idle: float | None = None
 
 
@@ -44,7 +44,7 @@ def build_lte_summary(results: list[TestResult]) -> list[SummaryResult]:
             result.channel_type,
             result.test_mode,
             result.bw,
-            getattr(result, "scene_id", "idle") or "idle",
+            getattr(result, "scene_id", "default") or "default",
         )
         grouped_results.setdefault(key, []).append(result)
 
