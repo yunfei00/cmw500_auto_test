@@ -489,7 +489,9 @@ class LeftPanel(QScrollArea):
         mode_layout.addStretch(1)
 
         trace_layout = QGridLayout()
+        self.operator_edit.setText("test")
         self.operator_edit.setPlaceholderText("测试人员")
+        self.dut_serial_edit.setText("test")
         self.dut_serial_edit.setPlaceholderText("DUT 序列号/资产号")
         trace_layout.addWidget(QLabel("测试人员："), 0, 0)
         trace_layout.addWidget(self.operator_edit, 0, 1)
