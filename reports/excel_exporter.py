@@ -2,8 +2,8 @@ from __future__ import annotations
 import json, os, tempfile
 from pathlib import Path
 
-RAW_HEADERS=["Run ID","序号","数据来源","制式","Band","信道","频点类型","测试模式","带宽(MHz)","仪表下发电平(dBm)","全局线损(dB)","信道线损(dB)","总线损(dB)","指标类型","指标值","包数","BLER门限(%)","尝试次数","扫描阶段","结果","状态","错误信息","时间"]
-SUMMARY_HEADERS=["Run ID","数据来源","制式","Band","信道","频点类型","测试模式","带宽(MHz)","灵敏度(dBm)","最终BLER(%)","RSRP(dBm)","RSRQ(dB)","PASS数量","FAIL数量","总数","结果","备注"]
+RAW_HEADERS=["Run ID","序号","数据来源","场景","制式","Band","信道","频点类型","测试模式","带宽(MHz)","仪表下发电平(dBm)","全局线损(dB)","信道线损(dB)","总线损(dB)","指标类型","指标值","包数","BLER门限(%)","尝试次数","扫描阶段","结果","状态","错误信息","时间"]
+SUMMARY_HEADERS=["Run ID","数据来源","场景","制式","Band","信道","频点类型","测试模式","带宽(MHz)","灵敏度(dBm)","相对Idle劣化(dB)","最终BLER(%)","RSRP(dBm)","RSRQ(dB)","PASS数量","FAIL数量","总数","结果","备注"]
 
 def export_results_to_excel(raw_results,summary_results,file_path,run_metadata=None):
     from openpyxl import Workbook
@@ -39,10 +39,10 @@ def _auto_fit_columns(sheet):
     from openpyxl.utils import get_column_letter
     for i,cells in enumerate(sheet.iter_cols(),1): sheet.column_dimensions[get_column_letter(i)].width=min(max(max((len("" if c.value is None else str(c.value)) for c in cells),default=0)+2,10),32)
 
-def _raw_result_row(r): return [getattr(r,"run_id",""),r.index,getattr(r,"data_source",""),r.mode,r.band,r.channel,r.channel_type,r.test_mode,getattr(r,"bw",None),getattr(r,"instrument_level",None),getattr(r,"global_cable_loss",None),getattr(r,"channel_loss",None),getattr(r,"total_loss",None),r.metric_type,r.metric_value,getattr(r,"packet_count",None),getattr(r,"bler_threshold",None),getattr(r,"attempt",1),getattr(r,"scan_phase",""),r.result,r.status,getattr(r,"error_message",""),r.timestamp]
+def _raw_result_row(r): return [getattr(r,"run_id",""),r.index,getattr(r,"data_source",""),getattr(r,"scene_id","default"),r.mode,r.band,r.channel,r.channel_type,r.test_mode,getattr(r,"bw",None),getattr(r,"instrument_level",None),getattr(r,"global_cable_loss",None),getattr(r,"channel_loss",None),getattr(r,"total_loss",None),r.metric_type,r.metric_value,getattr(r,"packet_count",None),getattr(r,"bler_threshold",None),getattr(r,"attempt",1),getattr(r,"scan_phase",""),r.result,r.status,getattr(r,"error_message",""),r.timestamp]
 def _summary_result_row(r):
     unavailable=getattr(r,"reference_metrics_status","")=="UNAVAILABLE"; final_bler=getattr(r,"final_bler",None)
-    return [getattr(r,"run_id",""),getattr(r,"data_source",""),r.mode,r.band,r.channel,r.channel_type,r.test_mode,getattr(r,"bw",None),"-" if r.sensitivity is None else r.sensitivity,"N/A" if final_bler is None else final_bler,"N/A" if unavailable or getattr(r,"rsrp",None) is None else r.rsrp,"N/A" if unavailable or getattr(r,"rsrq",None) is None else r.rsrq,r.pass_count,r.fail_count,r.total_count,r.result,r.remark]
+    return [getattr(r,"run_id",""),getattr(r,"data_source",""),getattr(r,"scene_id","default"),r.mode,r.band,r.channel,r.channel_type,r.test_mode,getattr(r,"bw",None),"-" if r.sensitivity is None else r.sensitivity,"N/A" if getattr(r,"delta_vs_idle",None) is None else getattr(r,"delta_vs_idle",None),"N/A" if final_bler is None else final_bler,"N/A" if unavailable or getattr(r,"rsrp",None) is None else r.rsrp,"N/A" if unavailable or getattr(r,"rsrq",None) is None else r.rsrq,r.pass_count,r.fail_count,r.total_count,r.result,r.remark]
 def _write_metadata_sheet(sheet,md,warnings,hf,font):
     from openpyxl.styles import Font,PatternFill
     sheet.append(["Field","Value"])
