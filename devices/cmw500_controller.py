@@ -202,7 +202,7 @@ class RealCMW500(InstrumentBase):
         """Configure LTE signaling settings that apply to the complete run.
 
         Order is intentionally fixed: LTE app -> RF route -> input/output line
-        loss -> UE Report -> MAXP/P-Max -> RMC -> security. Every critical
+        loss -> MAXP/P-Max -> RMC -> security. Every critical
         setting is verified where the CMW500 exposes a direct query.
         """
 
@@ -254,10 +254,6 @@ class RealCMW500(InstrumentBase):
         self.current_cable_loss = loss
 
         fixed_commands = (
-            (
-                "CONFigure:LTE:SIGN:UEReport:ENABle ON",
-                "lte_prepare_run.ue_report",
-            ),
             (
                 "CONFigure:LTE:SIGN:UL:PUSCh:TPC:SET MAXP",
                 "lte_prepare_run.ul_tpc_maxp",
