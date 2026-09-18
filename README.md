@@ -15,7 +15,8 @@
 - 每次测试使用独立 Run ID，并记录仪表 IDN、连接参数、配置快照、配置哈希、软件版本、构建 commit、校准信息和命令 trace。
 - 自动保存 Excel 报告，包含 `RawResults`、`Summary`、`RunMetadata`、`SCPITrace` 四个工作表。
 - `STOPPED`、`FAILED`、`FAILED_UNSAFE` 报告带不完整/不安全水印，不能被误认为正式 PASS。
-- 基础 ADB 能力：设备刷新、APK 安装、重启、App 启停、清数据和截图；耗时操作在后台执行。
+- 基础 ADB 能力：设备刷新、APK 安装（自动授予运行时权限）、重启、App 启停、清数据和截图；耗时操作在后台执行。
+- AutoTestSceneApp 场景联动：可按 Idle、音乐、视频、游戏高负载等场景自动启动/停止手机场景，再执行 LTE 灵敏度扫描，并计算相对 Idle 的灵敏度劣化。
 - 用户配置、日志、截图和自动报告保存在 `%LOCALAPPDATA%\cmw500_auto_test`，不会写入程序安装目录。
 
 当前只开放 LTE。WiFi、WCDMA、GSM 页签已禁用，尚未形成测试闭环。
@@ -43,6 +44,27 @@ ADB 功能需要安装 Android Platform Tools，并确保 `adb` 在 `PATH` 中�
 ```powershell
 adb devices
 ```
+
+## 手机场景测试
+
+在“测试场景选择”中可同时勾选多个场景。默认场景组合为：
+
+- Idle 空闲基线
+- Music 音乐
+- Video 视频
+- Game Heavy 高负载
+
+启用场景测试时，需要先在“手机设置”中刷新并选择 ADB 设备，场景 App 包名默认为 `com.yunfei.autotestscene`。测试流程会在场景切换前执行 Cell OFF，确认场景启动后等待稳定时间，再重新建小区、Attach 并执行灵敏度扫描。场景停止失败不会跳过仪表安全清理。
+
+结果的 RawResults / Summary 会记录场景；当同一 Run 中存在 Idle 基线时，Summary 额外计算“相对Idle劣化(dB)”：
+
+```text
+劣化(dB) = 当前场景灵敏度 - Idle灵敏度
+```
+
+例如 Idle=-101.5 dBm、Video=-99.7 dBm，则 Video 相对 Idle 劣化为 +1.8 dB。
+
+取消全部场景勾选后，工具保持原有 LTE 单流程行为，不要求 ADB 设备。
 
 ## 正式测试操作要求
 
