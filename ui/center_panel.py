@@ -92,7 +92,7 @@ class CenterPanel(QWidget):
     def _clear_table(self):
         if self.run_active: self._log("WARNING","测试运行中不能清除测试结果"); return
         self._reset_results(); self.run_metadata={}; self.simulation_banner.hide(); self._log("INFO","已清除界面中的全部测试结果")
-    def _reset_results(self): self.table.setRowCount(0); self.summary_table.setRowCount(0); self.test_results.clear(); self.summary_results.clear(); self.update_summary({"当前制式":"-","当前Band":"-","当前信道":"-","当前电平":"-","当前进度":"0/0"}); self.tab_widget.setCurrentWidget(self.summary_tab)
+    def _reset_results(self): self.table.setRowCount(0); self.summary_table.setRowCount(0); self.test_results.clear(); self.summary_results.clear(); self.update_summary({"当前场景":"-","当前制式":"-","当前Band":"-","当前信道":"-","当前电平":"-","当前进度":"0/0"}); self.tab_widget.setCurrentWidget(self.summary_tab)
     def _create_table(self,headers):
         t=QTableWidget(0,len(headers)); t.setHorizontalHeaderLabels(headers); t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers); t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); t.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection); t.setAlternatingRowColors(True); t.verticalHeader().setVisible(False); t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch); t.horizontalHeader().setMinimumSectionSize(72); return t
     def _export_current_results(self):
