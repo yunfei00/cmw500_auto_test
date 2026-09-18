@@ -19,7 +19,7 @@ from reports.excel_exporter import export_results_to_excel
 LogCallback = Callable[[str, str], None]
 
 class CenterPanel(QWidget):
-    HEADERS = ["Run ID", "序号", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "仪表下发电平(dBm)", "总线损(dB)", "指标类型", "指标值", "尝试次数", "扫描阶段", "结果", "状态", "错误信息", "时间"]
+    HEADERS = ["Run ID", "序号", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "场景", "带宽(MHz)", "仪表下发电平(dBm)", "总线损(dB)", "指标类型", "指标值", "尝试次数", "扫描阶段", "结果", "状态", "错误信息", "时间"]
     SUMMARY_HEADERS = ["Run ID", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "灵敏度(dBm)", "RSRP(dBm)", "RSRQ(dB)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
 
     def __init__(self) -> None:
@@ -104,7 +104,7 @@ class CenterPanel(QWidget):
         except Exception as exc: self._log("ERROR",f"结果导出失败：{exc}"); return
         self._log("INFO",f"结果已导出：{path}")
     def _normalize_row_data(self,r):
-        if isinstance(r,TestResult) or is_dataclass(r): return {"Run ID":getattr(r,"run_id",""),"序号":r.index,"数据来源":getattr(r,"data_source",""),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"仪表下发电平(dBm)":self._format_number(getattr(r,"instrument_level",None)),"总线损(dB)":self._format_number(getattr(r,"total_loss",None)),"指标类型":r.metric_type,"指标值":self._format_number(r.metric_value,2),"尝试次数":getattr(r,"attempt",1),"扫描阶段":getattr(r,"scan_phase",""),"结果":r.result,"状态":r.status,"错误信息":getattr(r,"error_message",""),"时间":r.timestamp}
+        if isinstance(r,TestResult) or is_dataclass(r): return {"Run ID":getattr(r,"run_id",""),"序号":r.index,"数据来源":getattr(r,"data_source",""),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"场景":getattr(r,"scene","默认"),"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"仪表下发电平(dBm)":self._format_number(getattr(r,"instrument_level",None)),"总线损(dB)":self._format_number(getattr(r,"total_loss",None)),"指标类型":r.metric_type,"指标值":self._format_number(r.metric_value,2),"尝试次数":getattr(r,"attempt",1),"扫描阶段":getattr(r,"scan_phase",""),"结果":r.result,"状态":r.status,"错误信息":getattr(r,"error_message",""),"时间":r.timestamp}
         return dict(r)
     def _summary_result_to_row_data(self,r):
         ref_unavailable=getattr(r,"reference_metrics_status","")=="UNAVAILABLE"
