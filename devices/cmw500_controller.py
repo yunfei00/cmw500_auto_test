@@ -254,7 +254,9 @@ class RealCMW500(InstrumentBase):
         self.current_cable_loss = loss
 
         fixed_commands = (
-            ("CONFigure:LTE:SIGN:UEReport:ENABle ON", "lte_prepare_run.ue_report"),
+            ("CONFigure:LTE:SIGN:UEReport:ENABle OFF", "lte_prepare_run.ue_report_off"),
+            ("CONFigure:LTE:SIGN:UEReport:RINTerval I120", "lte_prepare_run.ue_report_interval"),
+            ("CONFigure:LTE:SIGN:UEReport:ENABle ON", "lte_prepare_run.ue_report_on"),
             (
                 "CONFigure:LTE:SIGN:UL:PUSCh:TPC:SET MAXP",
                 "lte_prepare_run.ul_tpc_maxp",
