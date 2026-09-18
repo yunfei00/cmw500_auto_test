@@ -508,15 +508,36 @@ class LeftPanel(QScrollArea):
         layout.setContentsMargins(8, 14, 8, 8)
         layout.setSpacing(8)
 
-        form = QFormLayout()
-        self.scene_combo = QComboBox()
-        self.scene_combo.addItems(["默认", "灭屏", "亮屏", "音乐", "前置主摄", "后置主摄", "马达", "表表"])
-        form.addRow("场景：", self.scene_combo)
-        hint = QLabel("当前已实现：默认、灭屏、亮屏；其他场景暂为占位")
-        hint.setWordWrap(True)
-        layout.addLayout(form)
-        layout.addWidget(hint)
+        self.scene_checkboxes: dict[str, QCheckBox] = {}
+        grid = QGridLayout()
+        scenes = ["灭屏", "亮屏", "音乐", "马达", "前置主摄", "后置主摄"]
+        for index, name in enumerate(scenes):
+            checkbox = QCheckBox(name)
+            checkbox.setChecked(name == "灭屏")
+            checkbox.toggled.connect(
+                lambda checked, scene=name: self._on_scene_toggled(scene, checked)
+            )
+            self.scene_checkboxes[name] = checkbox
+            grid.addWidget(checkbox, index // 2, index % 2)
+        layout.addLayout(grid)
         return group
+
+    def _on_scene_toggled(self, scene: str, checked: bool) -> None:
+        if not checked:
+            if not any(cb.isChecked() for cb in self.scene_checkboxes.values()):
+                self.scene_checkboxes[scene].setChecked(True)
+            return
+        for name, checkbox in self.scene_checkboxes.items():
+            if name != scene:
+                checkbox.blockSignals(True)
+                checkbox.setChecked(False)
+                checkbox.blockSignals(False)
+
+    def _current_scene(self) -> str:
+        for name, checkbox in self.scene_checkboxes.items():
+            if checkbox.isChecked():
+                return name
+        return "灭屏"
 
     def _create_control_group(self) -> QGroupBox:
         group = QGroupBox("测试控制")
@@ -1174,7 +1195,7 @@ class LeftPanel(QScrollArea):
             custom_channels=[],
             lte_test_items=self._selected_lte_test_items(),
             test_mode=self._current_test_mode(),
-            scene=self.scene_combo.currentText(),
+            scene=self._current_scene(),
             data=data,
             com_port=com_port,
         )
