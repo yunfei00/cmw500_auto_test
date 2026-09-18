@@ -11,6 +11,7 @@ dependencies = [
     "PyVISA==1.16.2",
     "PyVISA-py==0.8.1",
     "psutil==7.2.2",
+    "android-dut-agent @ git+https://github.com/yunfei00/android-dut-agent.git@d8bc6bc053fa2a9f1e09e46a57a33162d2dcbd37",
 ]
 
 [dependency-groups]
