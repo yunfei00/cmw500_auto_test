@@ -29,7 +29,7 @@ class LteTestConfig:
     custom_channels: list[int]
     lte_test_items: list[str]
     test_mode: str
-    scene: str = "默认"
+    scenes: list[str] = field(default_factory=lambda: ["灭屏"])
     data: list[dict[str, str | int | float]] = field(default_factory=list)
     run_id: str = ""
     com_port: int = 1
@@ -48,6 +48,7 @@ class TestItem:
     rx_level: float
     bw: float | None = None
     loss_db: float = 0.0
+    scene: str = "灭屏"
 
 
 @dataclass
@@ -82,7 +83,7 @@ class TestResult:
     rsrp: float | None = None
     rsrq: float | None = None
     reference_metrics_status: str = ""
-    scene: str = "默认"
+    scene: str = "灭屏"
 
 
 @dataclass
