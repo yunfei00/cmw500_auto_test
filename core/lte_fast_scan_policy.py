@@ -12,6 +12,8 @@ FAST_PACKET_DEFAULT=100; START_LEVEL_DEFAULT=-90.0; MAX_STEP_DEFAULT=0.3; MIN_ST
 FAST_CONFIRM_TRIGGER=1.2; CONFIRM_DIRECT_MIN=4.8; CONFIRM_DIRECT_MAX=5.0
 RECONNECT_BOOST_DB=5.0; RECONNECT_ATTEMPTS=3; ATTACH_ATTEMPTS=3
 FULL_CELL_BW_POWER_QUERY="SENSe:LTE:SIGN:DL:PCC:FCPOWer?"
+RSRP_QUERY="SENSe:LTE:SIGN:UEReport:PCC:RSRP?"
+RSRQ_QUERY="SENSe:LTE:SIGN:UEReport:PCC:RSRQ?"
 PUSCH_OPEN_LOOP_COMMAND="CONFigure:LTE:SIGN:UL:PCC:PUSCh:OLNPower"; PUSCH_CLOSED_LOOP_COMMAND="CONFigure:LTE:SIGN:UL:PCC:PUSCh:TPC:CLTPower"; SETTINGS_PREFIX="lte/"
 _original_create_lte_instrument_group=LeftPanel._create_lte_instrument_group; _original_create_lte_channel_group=LeftPanel._create_lte_channel_group; _original_create_lte_band_group=LeftPanel._create_lte_band_group; _original_collect_lte_config=LeftPanel.collect_lte_config; _original_measure_level=TestWorker._measure_level; _original_build_result=TestWorker._build_result; _original_configure_lte_run=TestWorker._configure_lte_run
 
@@ -91,6 +93,20 @@ def _query_full_cell_bw_power(worker):
     if not callable(query): return None
     try: return _parse_numeric(query(FULL_CELL_BW_POWER_QUERY))
     except Exception as exc: worker.log_signal.emit("WARNING",f"Full Cell BW Power 查询失败：{exc}"); return None
+def _collect_final_reference_metrics(worker):
+    result=getattr(worker,"_last_built_test_result",None)
+    if result is None or bool(getattr(worker.instrument,"is_simulation",False)): return
+    query=getattr(worker.instrument,"query",None)
+    if not callable(query): return
+    try:
+        result.rsrp=_parse_numeric(query(RSRP_QUERY))
+        result.rsrq=_parse_numeric(query(RSRQ_QUERY))
+        result.reference_metrics_status="AVAILABLE"
+        worker.log_signal.emit("INFO",f"最终参考值：RSRP={result.rsrp:g} dBm，RSRQ={result.rsrq:g} dB")
+    except Exception as exc:
+        result.rsrp=None; result.rsrq=None; result.reference_metrics_status="UNAVAILABLE"
+        worker.log_signal.emit("WARNING",f"最终 RSRP/RSRQ 查询失败（不影响 BLER 灵敏度结果）：{exc}")
+
 def _measure_with_packets(worker,item,level,phase,current,total,packet_count):
     op=worker.config.packet_count; oretry=worker.config.retry_count; worker.config.packet_count=int(packet_count); worker.config.retry_count=0
     try:
@@ -119,7 +135,7 @@ def _scan_item(self,item,current,total):
             self.log_signal.emit("INFO",f"CONFIRM BLER={confirm_bler:.2f}% 位于 {CONFIRM_DIRECT_MIN:g}%~{CONFIRM_DIRECT_MAX:g}%，直接确定 Sensitivity={level:g} dBm，不再向上回溯")
             result=getattr(self,"_last_built_test_result",None)
             if result is not None:
-                result.scan_phase="FINE"; result.result="PASS"; result.status="PASS"; self.row_signal.emit(result)
+                result.scan_phase="FINE"; result.result="PASS"; result.status="PASS"; _collect_final_reference_metrics(self); self.row_signal.emit(result)
             return
         if confirm_bler<float(self.config.bler_threshold): level=round(level-max_step,10); continue
         fail_level=level; fine=round(fail_level+min_step,10)
@@ -127,7 +143,7 @@ def _scan_item(self,item,current,total):
             fine,recovered=_ensure_connected_for_probe(self,item,fine)
             if recovered: level=fine; break
             if _measure_with_packets(self,item,fine,"FINE",current,total,formal):
-                self.log_signal.emit("INFO",f"Sensitivity 边界：PASS={fine:g} dBm，FAIL={fail_level:g} dBm"); return
+                _collect_final_reference_metrics(self); self.row_signal.emit(getattr(self,"_last_built_test_result",None)); self.log_signal.emit("INFO",f"Sensitivity 边界：PASS={fine:g} dBm，FAIL={fail_level:g} dBm"); return
             fail_level=fine; fine=round(fine+min_step,10)
 def apply_lte_fast_scan_policy():
     if getattr(TestWorker,"_lte_fast_scan_policy_applied",False): return
