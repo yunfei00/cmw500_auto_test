@@ -5,7 +5,7 @@ from typing import Any
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 from core.test_states import TestState
 from core.test_worker import TestWorker
-from core.android_dut_control import airplane_cycle as dut_airplane_cycle
+from core.android_dut_control import airplane_cycle as dut_airplane_cycle, apply_scene as apply_dut_scene
 from ui.left_panel import LeftPanel
 
 FAST_PACKET_DEFAULT=100; START_LEVEL_DEFAULT=-90.0; MAX_STEP_DEFAULT=0.3; MIN_STEP_DEFAULT=0.1; BLER_THRESHOLD_DEFAULT=5.0
@@ -48,12 +48,13 @@ def _collect_lte_config(self):
     config=_original_collect_lte_config(self); config.sensitivity_upper=config.start_level; config.fast_packet_count=int(self.fast_packet_count_spin.value()); config.reconnect_boost_db=RECONNECT_BOOST_DB; config.reconnect_attempts=RECONNECT_ATTEMPTS; config.pusch_open_loop_nom_power=float(self.pusch_open_loop_nom_power_spin.value()); config.pusch_closed_loop_target_power=float(self.pusch_closed_loop_target_power_spin.value()); _save_lte_settings(self,config); return config
 def _configure_lte_run(self):
     _original_configure_lte_run(self)
+    apply_dut_scene(self, getattr(self.config, "scene", "默认"))
     if bool(getattr(self.instrument,"is_simulation",False)): return
     write=getattr(self.instrument,"write",None)
     if not callable(write): return
     op=float(getattr(self.config,"pusch_open_loop_nom_power",23.0)); cp=float(getattr(self.config,"pusch_closed_loop_target_power",0.0)); write(f"{PUSCH_OPEN_LOOP_COMMAND} {op:g}"); write(f"{PUSCH_CLOSED_LOOP_COMMAND} {cp:g}"); self.log_signal.emit("INFO",f"PUSCH功控：Open Loop={op:g} dBm，Closed Loop={cp:g} dBm")
 def _build_result(self,*args,**kwargs):
-    result=_original_build_result(self,*args,**kwargs); self._last_built_test_result=result; return result
+    result=_original_build_result(self,*args,**kwargs); result.scene=str(getattr(self.config,"scene","默认")); self._last_built_test_result=result; return result
 def _wait_connected(worker,timeout):
     method=getattr(worker.instrument,"wait_for_attach",None)
     if not callable(method): return True
