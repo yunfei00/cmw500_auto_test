@@ -19,8 +19,8 @@ from reports.excel_exporter import export_results_to_excel
 LogCallback = Callable[[str, str], None]
 
 class CenterPanel(QWidget):
-    HEADERS = ["Run ID", "序号", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "仪表下发电平(dBm)", "总线损(dB)", "指标类型", "指标值", "尝试次数", "扫描阶段", "结果", "状态", "错误信息", "时间"]
-    SUMMARY_HEADERS = ["Run ID", "数据来源", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "灵敏度(dBm)", "RSRP(dBm)", "RSRQ(dB)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
+    HEADERS = ["Run ID", "序号", "数据来源", "场景", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "仪表下发电平(dBm)", "总线损(dB)", "指标类型", "指标值", "尝试次数", "扫描阶段", "结果", "状态", "错误信息", "时间"]
+    SUMMARY_HEADERS = ["Run ID", "数据来源", "场景", "制式", "Band", "信道", "频点类型", "测试模式", "带宽(MHz)", "灵敏度(dBm)", "相对Idle劣化(dB)", "RSRP(dBm)", "RSRQ(dB)", "PASS数量", "FAIL数量", "总数", "结果", "备注"]
 
     def __init__(self) -> None:
         super().__init__(); self._logger=None; self.summary_labels={}; self.test_results=[]; self.summary_results=[]; self.run_metadata={}; self.run_active=False; self.setMinimumWidth(520)
@@ -32,7 +32,7 @@ class CenterPanel(QWidget):
     def begin_run(self,metadata):
         # Do not clear previous runs automatically. The operator explicitly owns
         # the lifetime of the on-screen history through "清除测试结果".
-        self.run_metadata=dict(metadata); self.run_active=True; self.update_summary({"当前制式":"-","当前Band":"-","当前信道":"-","当前电平":"-","当前进度":"0/0"}); self.tab_widget.setCurrentWidget(self.summary_tab)
+        self.run_metadata=dict(metadata); self.run_active=True; self.update_summary({"当前场景":"-","当前制式":"-","当前Band":"-","当前信道":"-","当前电平":"-","当前进度":"0/0"}); self.tab_widget.setCurrentWidget(self.summary_tab)
         simulated=self.run_metadata.get("data_source")=="SIMULATION"; self.simulation_banner.setText("SIMULATION / 模拟数据，不得作为正式实测报告"); self.simulation_banner.setVisible(simulated); self.clear_button.setEnabled(False); self.export_button.setEnabled(False); self._log("INFO",f"新建测试任务：{self.run_metadata.get('run_id','-')}；保留此前测试结果")
     def finish_run(self,metadata):
         self.run_metadata=dict(metadata); self.run_active=False; self.clear_button.setEnabled(True); self.export_button.setEnabled(True); self.generate_summary_from_current_results(); terminal_status=str(self.run_metadata.get("status","FAILED")).upper(); self.run_metadata["status"]=terminal_status; msgs=[]
@@ -66,7 +66,7 @@ class CenterPanel(QWidget):
         if self.auto_scroll_checkbox.isChecked(): self.table.scrollToBottom()
         self.summary_results=build_lte_summary(self.test_results); self.update_summary_table(self.summary_results)
     def update_summary(self,data):
-        km={"current_mode":"当前制式","current_band":"当前Band","current_channel":"当前信道","current_level":"当前电平","progress":"当前进度"}
+        km={"current_scene":"当前场景","current_mode":"当前制式","current_band":"当前Band","current_channel":"当前信道","current_level":"当前电平","progress":"当前进度"}
         for k,v in {km.get(k,k):v for k,v in data.items()}.items():
             if k in self.summary_labels: self.summary_labels[k].setText(f"{k}：{v}")
     def update_summary_table(self,results):
@@ -84,7 +84,7 @@ class CenterPanel(QWidget):
         if self._logger: self._logger(level,message)
     def _create_summary_bar(self):
         f=QFrame(); f.setObjectName("summaryBar"); f.setFrameShape(QFrame.Shape.StyledPanel); f.setStyleSheet("QFrame#summaryBar {background:#ffffff;border:1px solid #c3cbd4;border-radius:4px;}"); l=QHBoxLayout(f); l.setContentsMargins(10,8,10,8); l.setSpacing(14)
-        for k in ["当前制式","当前Band","当前信道","当前电平","当前进度"]:
+        for k in ["当前场景","当前制式","当前Band","当前信道","当前电平","当前进度"]:
             label=QLabel(f"{k}：{'0/0' if k=='当前进度' else '-'}"); label.setMinimumWidth(88); self.summary_labels[k]=label; l.addWidget(label)
         l.addStretch(1); return f
     def _create_table_toolbar(self):
@@ -104,11 +104,11 @@ class CenterPanel(QWidget):
         except Exception as exc: self._log("ERROR",f"结果导出失败：{exc}"); return
         self._log("INFO",f"结果已导出：{path}")
     def _normalize_row_data(self,r):
-        if isinstance(r,TestResult) or is_dataclass(r): return {"Run ID":getattr(r,"run_id",""),"序号":r.index,"数据来源":getattr(r,"data_source",""),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"仪表下发电平(dBm)":self._format_number(getattr(r,"instrument_level",None)),"总线损(dB)":self._format_number(getattr(r,"total_loss",None)),"指标类型":r.metric_type,"指标值":self._format_number(r.metric_value,2),"尝试次数":getattr(r,"attempt",1),"扫描阶段":getattr(r,"scan_phase",""),"结果":r.result,"状态":r.status,"错误信息":getattr(r,"error_message",""),"时间":r.timestamp}
+        if isinstance(r,TestResult) or is_dataclass(r): return {"Run ID":getattr(r,"run_id",""),"序号":r.index,"数据来源":getattr(r,"data_source",""),"场景":getattr(r,"scene_id","default"),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"仪表下发电平(dBm)":self._format_number(getattr(r,"instrument_level",None)),"总线损(dB)":self._format_number(getattr(r,"total_loss",None)),"指标类型":r.metric_type,"指标值":self._format_number(r.metric_value,2),"尝试次数":getattr(r,"attempt",1),"扫描阶段":getattr(r,"scan_phase",""),"结果":r.result,"状态":r.status,"错误信息":getattr(r,"error_message",""),"时间":r.timestamp}
         return dict(r)
     def _summary_result_to_row_data(self,r):
         ref_unavailable=getattr(r,"reference_metrics_status","")=="UNAVAILABLE"
-        return {"Run ID":getattr(r,"run_id",""),"数据来源":getattr(r,"data_source",""),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"灵敏度(dBm)":"-" if r.sensitivity is None else f"{r.sensitivity:g}","RSRP(dBm)":"N/A" if ref_unavailable or r.rsrp is None else f"{r.rsrp:g}","RSRQ(dB)":"N/A" if ref_unavailable or r.rsrq is None else f"{r.rsrq:g}","PASS数量":r.pass_count,"FAIL数量":r.fail_count,"总数":r.total_count,"结果":r.result,"备注":r.remark}
+        return {"Run ID":getattr(r,"run_id",""),"数据来源":getattr(r,"data_source",""),"场景":getattr(r,"scene_id","default"),"制式":r.mode,"Band":r.band,"信道":r.channel,"频点类型":r.channel_type,"测试模式":r.test_mode,"带宽(MHz)":self._format_number(getattr(r,"bw",None)),"灵敏度(dBm)":"-" if r.sensitivity is None else f"{r.sensitivity:g}","相对Idle劣化(dB)":self._format_number(getattr(r,"delta_vs_idle",None),2),"RSRP(dBm)":"N/A" if ref_unavailable or r.rsrp is None else f"{r.rsrp:g}","RSRQ(dB)":"N/A" if ref_unavailable or r.rsrq is None else f"{r.rsrq:g}","PASS数量":r.pass_count,"FAIL数量":r.fail_count,"总数":r.total_count,"结果":r.result,"备注":r.remark}
     def _result_background(self,r):
         if r=="PASS": return QColor("#eaf7ea")
         if r in {"FAIL","FAILED"}: return QColor("#fdecec")
