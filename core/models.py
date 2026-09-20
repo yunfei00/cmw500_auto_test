@@ -35,6 +35,14 @@ class LteTestConfig:
     com_port: int = 1
     pusch_open_loop_nom_power: float = 23.0
     pusch_closed_loop_target_power: float = 0.0
+    scene_device_id: str = ""
+    scene_package_name: str = "com.yunfei.autotestscene"
+    scene_settle_time: float = 3.0
+    scene_duration: int = 0
+    scene_particles: int = 250
+    scene_cpu_threads: int = 2
+    scene_audio: bool = False
+    scene_vibration: bool = False
 
 
 @dataclass
