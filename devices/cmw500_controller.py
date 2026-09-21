@@ -24,6 +24,8 @@ _LTE_COM_ROUTES: dict[int, tuple[str, str, str, str]] = {
     4: ("RF4C", "RX2", "RF4C", "TX2"),
 }
 _LTE_TDD_BANDS = set(range(33, 54))
+_WCDMA_COM_ROUTES = _LTE_COM_ROUTES
+_WCDMA_BAND_TOKENS = {1: "OB1", 2: "OB2", 4: "OB4", 5: "OB5", 6: "OB6", 8: "OB8", 19: "OB19"}
 
 
 def is_cmw500_idn(response: str) -> bool:
@@ -197,6 +199,133 @@ class RealCMW500(InstrumentBase):
                 )
             )
         return responses
+
+    def wcdma_prepare_run(self, com_port: int = 1, cable_loss: float = 35.0) -> None:
+        port = int(com_port)
+        if port not in _WCDMA_COM_ROUTES:
+            raise ValueError(f"WCDMA COM 口仅支持 COM1..COM4：COM{port}")
+        loss = float(cable_loss)
+        if not math.isfinite(loss) or loss < 0:
+            raise ValueError(f"WCDMA 线损必须为非负有限数值：{cable_loss}")
+        self._execute_operation("write", "INST WCDMa", "wcdma_prepare_run.app")
+        expected_route = ",".join(_WCDMA_COM_ROUTES[port])
+        route_query = "ROUTe:WCDMa:SIGN:SCENario:SCELl?"
+        current_route = self._execute_operation("query", route_query, "wcdma_prepare_run.com_query")
+        assert current_route is not None
+        if _normalize_csv(current_route) != _normalize_csv(expected_route):
+            self._execute_operation("write", f"ROUTe:WCDMa:SIGN:SCENario:SCELl {expected_route}", "wcdma_prepare_run.com_set")
+            verified = self._execute_operation("query", route_query, "wcdma_prepare_run.com_verify")
+            assert verified is not None
+            if _normalize_csv(verified) != _normalize_csv(expected_route):
+                raise RuntimeError(f"WCDMA COM{port} 路由回读不一致：期望 {expected_route}，实际 {verified!r}")
+        self.current_com_port = port
+        self._set_and_verify_float(f"CONFigure:WCDMa:SIGN:RFSettings:CARRier:EATTenuation:INPut {loss:g}", "CONFigure:WCDMa:SIGN:RFSettings:CARRier:EATTenuation:INPut?", loss, "WCDMA 输入线损", "wcdma_prepare_run.loss_input")
+        self._set_and_verify_float(f"CONFigure:WCDMa:SIGN:RFSettings:CARRier:EATTenuation:OUTPut {loss:g}", "CONFigure:WCDMa:SIGN:RFSettings:CARRier:EATTenuation:OUTPut?", loss, "WCDMA 输出线损", "wcdma_prepare_run.loss_output")
+        self.current_cable_loss = loss
+        for command, stage in (
+            ("CONFigure:WCDMa:MEAS:MEValuation:REPetition SING", "wcdma_prepare_run.single"),
+            ("CONFigure:WCDMa:SIGN:CONNection:UETerminate TEST", "wcdma_prepare_run.ue_test"),
+            ("CONFigure:WCDMa:SIGN:CONNection:TMODe:TYPE RMC", "wcdma_prepare_run.rmc"),
+            ("CONFigure:WCDMa:SIGN:CONNection:TMODe:RMC:TMODe MODE1", "wcdma_prepare_run.mode1"),
+            ("CONFigure:WCDMa:SIGN:CONNection:TMODe:RMC:DATA PRBS9", "wcdma_prepare_run.prbs9"),
+            ("CONFigure:WCDMa:SIGN:UL:TPC:SET ALL1", "wcdma_prepare_run.tpc_all1"),
+        ):
+            self._execute_operation("write", command, stage)
+
+    def wcdma_set_band(self, band: int | str) -> None:
+        number = int(str(band).strip().upper().replace("BAND", "").replace("B", ""))
+        token = _WCDMA_BAND_TOKENS.get(number)
+        if token is None:
+            raise ValueError(f"不支持的 WCDMA Band：{band}")
+        self._execute_operation("write", f"CONFigure:WCDMa:SIGN:CARRier:BAND {token}", "wcdma.band")
+        self.current_band = f"B{number}"
+
+    def wcdma_set_power(self, power: float) -> None:
+        value = float(power)
+        if not math.isfinite(value):
+            raise ValueError("WCDMA Power 必须是有限数值")
+        self._execute_operation("write", f"CONFigure:WCDMa:SIGN:RFSettings:COPower {value:g}", "wcdma.power")
+        self.current_rx_level = value
+
+    def wcdma_set_channel(self, channel: int) -> None:
+        value = int(channel)
+        self._execute_operation("write", f"CONFigure:WCDMa:SIGN:RFSettings:CARRier:CHANnel:DL {value}", "wcdma.channel")
+        self.current_channel = value
+
+    def wcdma_cell_on(self, timeout: float = 20.0, interval: float = 0.2) -> bool:
+        self._execute_operation("write", "SOURce:WCDMa:SIGN:CELL ON", "wcdma.cell_on")
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            state = str(self._execute_operation("query", "SOURce:WCDMa:SIGN:CELL:STATe?", "wcdma.cell_state") or "").strip().upper()
+            if state != "PEND":
+                return state in {"ON", "ADJ"}
+            if time.monotonic() >= deadline:
+                return False
+            self._sleep_cancelable(min(float(interval), max(deadline - time.monotonic(), 0.0)))
+
+    def wcdma_cell_off(self) -> None:
+        self._execute_operation("write", "SOURce:WCDMa:SIGN:CELL OFF", "wcdma.cell_off")
+
+    def wcdma_connection_states(self) -> tuple[str, str]:
+        cs = str(self._execute_operation("query", "FETCh:WCDMa:SIGN:CSWitched:STATe?", "wcdma.cs_state") or "").strip().upper()
+        ps = str(self._execute_operation("query", "FETCh:WCDMa:SIGN:PSWitched:STATe?", "wcdma.ps_state") or "").strip().upper()
+        return cs, ps
+
+    def wcdma_ensure_connected(self, timeout: float = 20.0, interval: float = 5.0) -> bool:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            cs, ps = self.wcdma_connection_states()
+            if cs == "CEST" and ps in {"ATT", "ON"}:
+                return True
+            if cs == "REG":
+                self._execute_operation("write", "CALL:WCDMa:SIGN:CSWitched:ACTion CONNect", "wcdma.cs_connect")
+            if time.monotonic() >= deadline:
+                self.last_warning = f"WCDMA 连接超时，最后状态 CS={cs or '-'}, PS={ps or '-'}"
+                return False
+            self._sleep_cancelable(min(float(interval), max(deadline - time.monotonic(), 0.0)))
+
+    def wcdma_measure_ber(self, packet_count: int, reconnect: bool = True) -> float:
+        count = int(packet_count)
+        if count <= 0:
+            raise ValueError("WCDMA BER 测试包个数必须大于 0")
+        if not self.wcdma_ensure_connected():
+            raise RuntimeError("WCDMA BER 测量前连接检查失败")
+        for attempt in range(2 if reconnect else 1):
+            self._execute_operation("write", "ABORt:WCDMa:SIGN:BER", "wcdma.ber.abort")
+            self._execute_operation("write", "CONFigure:WCDMa:MEAS:MEValuation:REPetition SING", "wcdma.ber.single")
+            self._execute_operation("write", f"CONFigure:WCDMa:SIGN:BER:TBLocks {count}", "wcdma.ber.blocks")
+            self._execute_operation("write", "CONFigure:WCDMa:SIGN:BER:SCONdition NONE", "wcdma.ber.stop_condition")
+            self._execute_operation("write", "INITiate:WCDMa:SIGN:BER", "wcdma.ber.init")
+            ready = False
+            for _ in range(200):
+                state = str(self._execute_operation("query", "FETCh:WCDMa:SIGN:BER:STATe?", "wcdma.ber.state") or "").strip().upper()
+                if state == "RDY":
+                    ready = True
+                    break
+                self._sleep_cancelable(0.2)
+            if not ready:
+                raise RuntimeError("WCDMA BER 测量等待 RDY 超时（200 x 0.2s）")
+            raw = str(self._execute_operation("query", "FETCh:WCDMa:SIGN:BER?", "wcdma.ber.result") or "").strip()
+            fields = [field.strip().strip('"') for field in raw.split(",")]
+            if len(fields) < 2:
+                raise RuntimeError(f"WCDMA BER 返回字段不足：{raw!r}")
+            status = fields[0].upper()
+            ber_text = fields[1].upper()
+            if status == "0" and ber_text != "INV":
+                try:
+                    return float(fields[1])
+                except ValueError as exc:
+                    raise RuntimeError(f"WCDMA BER 无法解析：{raw!r}") from exc
+            if ber_text == "INV" and attempt == 0 and reconnect:
+                if not self.wcdma_ensure_connected():
+                    raise RuntimeError(f"WCDMA BER=INV 且重连失败：{raw!r}")
+                continue
+            if status == "3":
+                raise RuntimeError("WCDMA BER 状态=3：输入信号可能过高，结果不准确，请调整位置后重新测量")
+            if status == "4":
+                raise RuntimeError("WCDMA BER 状态=4：输入信号可能过低，结果不准确，需要重新测量")
+            raise RuntimeError(f"WCDMA BER 无效结果：{raw!r}")
+        raise RuntimeError("WCDMA BER 测量失败")
 
     def lte_prepare_run(self, com_port: int = 1, cable_loss: float = 35.0) -> None:
         """Configure LTE signaling settings that apply to the complete run.
