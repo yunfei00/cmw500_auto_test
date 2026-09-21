@@ -29,11 +29,20 @@ class LteTestConfig:
     custom_channels: list[int]
     lte_test_items: list[str]
     test_mode: str
+    scenes: list[str] = field(default_factory=lambda: ["灭屏"])
     data: list[dict[str, str | int | float]] = field(default_factory=list)
     run_id: str = ""
     com_port: int = 1
     pusch_open_loop_nom_power: float = 23.0
     pusch_closed_loop_target_power: float = 0.0
+    scene_device_id: str = ""
+    scene_package_name: str = "com.yunfei.autotestscene"
+    scene_settle_time: float = 3.0
+    scene_duration: int = 0
+    scene_particles: int = 250
+    scene_cpu_threads: int = 2
+    scene_audio: bool = False
+    scene_vibration: bool = False
 
 
 @dataclass
@@ -47,6 +56,7 @@ class TestItem:
     rx_level: float
     bw: float | None = None
     loss_db: float = 0.0
+    scene: str = "灭屏"
 
 
 @dataclass
@@ -81,6 +91,7 @@ class TestResult:
     rsrp: float | None = None
     rsrq: float | None = None
     reference_metrics_status: str = ""
+    scene: str = "灭屏"
 
 
 @dataclass

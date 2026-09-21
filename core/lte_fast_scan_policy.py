@@ -5,11 +5,12 @@ from typing import Any
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 from core.test_states import TestState
 from core.test_worker import TestWorker
+from core.android_dut_control import airplane_cycle as dut_airplane_cycle, apply_scene as apply_dut_scene
 from ui.left_panel import LeftPanel
 
 FAST_PACKET_DEFAULT=100; START_LEVEL_DEFAULT=-90.0; MAX_STEP_DEFAULT=0.3; MIN_STEP_DEFAULT=0.1; BLER_THRESHOLD_DEFAULT=5.0
 FAST_CONFIRM_TRIGGER=1.2; CONFIRM_DIRECT_MIN=4.8; CONFIRM_DIRECT_MAX=5.0
-RECONNECT_BOOST_DB=5.0; RECONNECT_ATTEMPTS=3; ATTACH_ATTEMPTS=3; REFERENCE_METRIC_ATTEMPTS=3
+RECONNECT_BOOST_DB=5.0; RECONNECT_ATTEMPTS=3; ATTACH_ATTEMPTS=3
 FULL_CELL_BW_POWER_QUERY="SENSe:LTE:SIGN:DL:PCC:FCPOWer?"
 RSRP_QUERY="SENSe:LTE:SIGN:UEReport:PCC:RSRP?"
 RSRQ_QUERY="SENSe:LTE:SIGN:UEReport:PCC:RSRQ?"
@@ -52,7 +53,7 @@ def _configure_lte_run(self):
     if not callable(write): return
     op=float(getattr(self.config,"pusch_open_loop_nom_power",23.0)); cp=float(getattr(self.config,"pusch_closed_loop_target_power",0.0)); write(f"{PUSCH_OPEN_LOOP_COMMAND} {op:g}"); write(f"{PUSCH_CLOSED_LOOP_COMMAND} {cp:g}"); self.log_signal.emit("INFO",f"PUSCH功控：Open Loop={op:g} dBm，Closed Loop={cp:g} dBm")
 def _build_result(self,*args,**kwargs):
-    result=_original_build_result(self,*args,**kwargs); self._last_built_test_result=result; return result
+    result=_original_build_result(self,*args,**kwargs); result.scene=str(getattr(args[0] if args else kwargs.get("item"),"scene","灭屏")); self._last_built_test_result=result; return result
 def _wait_connected(worker,timeout):
     method=getattr(worker.instrument,"wait_for_attach",None)
     if not callable(method): return True
@@ -60,7 +61,10 @@ def _wait_connected(worker,timeout):
 def _prepare_cell(self,item):
     self.set_state(TestState.CELL_CONFIGURING,f"状态切换：CELL_CONFIGURING - 配置 LTE 小区 {item.band}/{item.channel}"); self._call_lte_prepare_cell(item); self._raise_if_stopped(); self._emit_instrument_warning(); self.log_signal.emit("INFO",f"LTE 小区配置完成：{item.band} 信道 {item.channel} BW={item.bw}")
     for attempt in range(1,ATTACH_ATTEMPTS+1):
-        self.set_state(TestState.CELL_ON,"状态切换：CELL_ON - LTE Cell ON"); self._call_lte_cell_on(item); self._raise_if_stopped(); self._emit_instrument_warning(); self.set_state(TestState.WAITING_ATTACH,"状态切换：WAITING_ATTACH - 等待 UE Attach"); started=time.monotonic(); connected=self._call_wait_for_attach(); elapsed=time.monotonic()-started
+        self.set_state(TestState.CELL_ON,"状态切换：CELL_ON - LTE Cell ON"); self._call_lte_cell_on(item); self._raise_if_stopped(); self._emit_instrument_warning()
+        self.log_signal.emit("INFO","LTE Cell ON 后执行 DUT 飞行模式快速连接")
+        dut_airplane_cycle(self)
+        self.set_state(TestState.WAITING_ATTACH,"状态切换：WAITING_ATTACH - 等待 UE Attach"); started=time.monotonic(); connected=self._call_wait_for_attach(); elapsed=time.monotonic()-started
         if connected: self._raise_if_stopped(); self._emit_instrument_warning(); self.set_state(TestState.ATTACHED,"状态切换：ATTACHED - UE 已连接"); self.log_signal.emit("INFO",f"UE 已连接，耗时 {elapsed:.2f} s"); self._run_before_measure(); return
         self._emit_instrument_warning(); self.log_signal.emit("WARNING",f"UE Attach 超时：已等待 {elapsed:.2f} s（{attempt}/{ATTACH_ATTEMPTS}）")
         if attempt>=ATTACH_ATTEMPTS: break
@@ -72,7 +76,10 @@ def _ensure_connected_for_probe(worker,item,requested_level):
     if _wait_connected(worker,0.0): return level,False
     boost=float(getattr(worker.config,"reconnect_boost_db",RECONNECT_BOOST_DB)); attempts=int(getattr(worker.config,"reconnect_attempts",RECONNECT_ATTEMPTS)); worker.log_signal.emit("WARNING",f"{item.band}/{item.channel} UE 已掉线，开始 +{boost:g} dB 恢复"); recovery=level
     for attempt in range(1,attempts+1):
-        recovery=round(recovery+boost,10); worker.instrument.set_rx_level(worker._instrument_level_for_dut(item,recovery)); worker._raise_if_stopped(); worker._emit_instrument_warning(); started=time.monotonic()
+        recovery=round(recovery+boost,10); worker.instrument.set_rx_level(worker._instrument_level_for_dut(item,recovery)); worker._raise_if_stopped(); worker._emit_instrument_warning()
+        worker.log_signal.emit("WARNING",f"UE 掉线恢复 {attempt}/{attempts}：执行 DUT 飞行模式循环")
+        dut_airplane_cycle(worker)
+        started=time.monotonic()
         if _wait_connected(worker,10.0): worker.log_signal.emit("INFO",f"UE 已恢复连接，耗时 {time.monotonic()-started:.2f} s"); return recovery,True
         worker.log_signal.emit("WARNING",f"UE 重连超时：已等待 {time.monotonic()-started:.2f} s（{attempt}/{attempts}）")
     raise RuntimeError(f"UE 掉线后连续 {attempts} 次 +{boost:g} dB 仍无法恢复连接")
@@ -86,20 +93,27 @@ def _query_full_cell_bw_power(worker):
     if not callable(query): return None
     try: return _parse_numeric(query(FULL_CELL_BW_POWER_QUERY))
     except Exception as exc: worker.log_signal.emit("WARNING",f"Full Cell BW Power 查询失败：{exc}"); return None
-def _collect_reference_metrics(worker,item,level):
+def _collect_final_reference_metrics(worker):
     result=getattr(worker,"_last_built_test_result",None)
-    if result is None: return
-    if bool(getattr(worker.instrument,"is_simulation",False)):
-        result.reference_metrics_status="UNAVAILABLE"; worker.row_signal.emit(result); return
+    if result is None or bool(getattr(worker.instrument,"is_simulation",False)): return
     query=getattr(worker.instrument,"query",None)
-    if not callable(query): result.reference_metrics_status="UNAVAILABLE"; worker.row_signal.emit(result); return
-    for attempt in range(1,REFERENCE_METRIC_ATTEMPTS+1):
+    if not callable(query): return
+    attempts=3
+    for attempt in range(1,attempts+1):
+        if attempt>1:
+            worker.log_signal.emit("INFO",f"RSRP/RSRQ 等待稳定后重试 {attempt}/{attempts}")
+            time.sleep(0.5)
         try:
-            rsrp=_parse_numeric(query(RSRP_QUERY)); worker._raise_if_stopped(); rsrq=_parse_numeric(query(RSRQ_QUERY)); worker._raise_if_stopped(); result.rsrp=rsrp; result.rsrq=rsrq; result.reference_metrics_status="OK"; worker.log_signal.emit("INFO",f"{item.band}/{item.channel} 最终参考值：RSRP={rsrp:g} dBm，RSRQ={rsrq:g} dB"); worker.row_signal.emit(result); return
+            rsrp=_parse_numeric(query(RSRP_QUERY))
+            rsrq=_parse_numeric(query(RSRQ_QUERY))
+            result.rsrp=rsrp; result.rsrq=rsrq; result.reference_metrics_status="AVAILABLE"
+            worker.log_signal.emit("INFO",f"最终参考值：RSRP={rsrp:g} dBm，RSRQ={rsrq:g} dB（{attempt}/{attempts}）")
+            return
         except Exception as exc:
-            worker.log_signal.emit("WARNING",f"{item.band}/{item.channel} RSRP/RSRQ 获取失败（{attempt}/{REFERENCE_METRIC_ATTEMPTS}）：{exc}")
-            if attempt<REFERENCE_METRIC_ATTEMPTS: time.sleep(0.3)
-    result.reference_metrics_status="UNAVAILABLE"; worker.log_signal.emit("WARNING",f"{item.band}/{item.channel} RSRP/RSRQ 连续 {REFERENCE_METRIC_ATTEMPTS} 次获取失败，记录为 N/A；不影响灵敏度结果"); worker.row_signal.emit(result)
+            worker.log_signal.emit("WARNING",f"RSRP/RSRQ 查询失败 {attempt}/{attempts}：{exc}")
+    result.rsrp=None; result.rsrq=None; result.reference_metrics_status="UNAVAILABLE"
+    worker.log_signal.emit("WARNING","RSRP/RSRQ 连续 3 次查询失败，保留 N/A；不影响 BLER 灵敏度结果")
+
 def _measure_with_packets(worker,item,level,phase,current,total,packet_count):
     op=worker.config.packet_count; oretry=worker.config.retry_count; worker.config.packet_count=int(packet_count); worker.config.retry_count=0
     try:
@@ -128,15 +142,15 @@ def _scan_item(self,item,current,total):
             self.log_signal.emit("INFO",f"CONFIRM BLER={confirm_bler:.2f}% 位于 {CONFIRM_DIRECT_MIN:g}%~{CONFIRM_DIRECT_MAX:g}%，直接确定 Sensitivity={level:g} dBm，不再向上回溯")
             result=getattr(self,"_last_built_test_result",None)
             if result is not None:
-                result.scan_phase="FINE"; result.result="PASS"; result.status="PASS"; self.row_signal.emit(result)
-            _collect_reference_metrics(self,item,level); return
+                result.scan_phase="FINE"; result.result="PASS"; result.status="PASS"; _collect_final_reference_metrics(self); self.row_signal.emit(result)
+            return
         if confirm_bler<float(self.config.bler_threshold): level=round(level-max_step,10); continue
         fail_level=level; fine=round(fail_level+min_step,10)
         while True:
             fine,recovered=_ensure_connected_for_probe(self,item,fine)
             if recovered: level=fine; break
             if _measure_with_packets(self,item,fine,"FINE",current,total,formal):
-                self.log_signal.emit("INFO",f"Sensitivity 边界：PASS={fine:g} dBm，FAIL={fail_level:g} dBm"); _collect_reference_metrics(self,item,fine); return
+                _collect_final_reference_metrics(self); self.row_signal.emit(getattr(self,"_last_built_test_result",None)); self.log_signal.emit("INFO",f"Sensitivity 边界：PASS={fine:g} dBm，FAIL={fail_level:g} dBm"); return
             fail_level=fine; fine=round(fine+min_step,10)
 def apply_lte_fast_scan_policy():
     if getattr(TestWorker,"_lte_fast_scan_policy_applied",False): return

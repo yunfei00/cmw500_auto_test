@@ -10,7 +10,6 @@ from core.lte_channel_config_persistence import apply_lte_channel_config_persist
 from core.lte_start_level_policy import apply_lte_start_level_policy
 from core.lte_operator_summary_policy import apply_lte_operator_summary_policy
 from core.lte_settle_time_policy import apply_lte_settle_time_policy
-from core.lte_ue_report_experiment import apply_lte_ue_report_experiment
 
 # Apply the LTE V1 scan behavior before MainWindow/LeftPanel instances are created.
 apply_lte_fast_scan_policy()
@@ -24,8 +23,6 @@ apply_lte_start_level_policy()
 apply_lte_operator_summary_policy()
 # Permit sub-second settle times (for example 0.1 s) without changing scan semantics.
 apply_lte_settle_time_policy()
-# CMW500 experiment: 120 ms UE measurement reports + RSRP/RSRQ sampling per BLER point.
-apply_lte_ue_report_experiment()
 
 from ui.main_window import MainWindow  # noqa: E402
 

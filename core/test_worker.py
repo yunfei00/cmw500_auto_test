@@ -44,6 +44,7 @@ class TestWorker(QObject):
         self.run_metadata = TestRunMetadata(run_id=self.run_id, data_source=self.data_source, instrument_mode=self.instrument.__class__.__name__, config_snapshot=asdict(config))
         self.current_state = TestState.IDLE
         self.last_cell_key: tuple[str, int, float | None] | None = None
+        self.last_scene: str | None = None
         self._instrument_session_started = False
         self._paused = False
         self._stopped = False
@@ -81,6 +82,11 @@ class TestWorker(QObject):
                     self._prepare_cell(item)
                     after_measure_needed = True
                     self.last_cell_key = cell_key
+                scene = str(getattr(item, "scene", "灭屏"))
+                if self.last_scene != scene:
+                    from core.android_dut_control import apply_scene
+                    apply_scene(self, scene)
+                    self.last_scene = scene
                 self.set_state(TestState.MEASURING, "状态切换：MEASURING - 开始灵敏度扫描")
                 if not self._measure_item(item, current, total):
                     outcome = TestState.FAILED
@@ -103,6 +109,11 @@ class TestWorker(QObject):
             with QMutexLocker(self._mutex):
                 self._cleanup_started = True
                 self._paused = False
+            try:
+                from core.android_dut_control import cleanup_scene
+                cleanup_scene(self)
+            except Exception as exc:
+                self.log_signal.emit("WARNING", f"DUT 场景清理异常：{exc}")
             cleanup_connection_ok = self._prepare_instrument_for_cleanup()
             if after_measure_needed:
                 try:
@@ -307,7 +318,7 @@ class TestWorker(QObject):
     def _build_result(self,item:TestItem,bler:float|None,result:str,status:str,*,attempt:int=1,phase:str="COARSE",instrument_level:float|None=None,error_message:str="")->TestResult:
         total_loss=float(self.config.cable_loss)+float(item.loss_db)
         if instrument_level is None: instrument_level=self._instrument_level_for_dut(item,item.rx_level)
-        return TestResult(index=item.index,mode=item.mode,band=item.band,channel=item.channel,channel_type=item.channel_type,test_mode=item.test_mode,rx_level=item.rx_level,metric_type="BLER",metric_value=bler,result=result,status=status,run_id=self.run_id,data_source=self.data_source,bw=item.bw,global_cable_loss=float(self.config.cable_loss),channel_loss=float(item.loss_db),total_loss=total_loss,instrument_level=instrument_level,packet_count=int(self.config.packet_count),bler_threshold=float(self.config.bler_threshold),sensitivity_upper=float(self.config.sensitivity_upper),attempt=attempt,scan_phase=phase,error_message=error_message)
+        return TestResult(index=item.index,mode=item.mode,band=item.band,channel=item.channel,channel_type=item.channel_type,test_mode=item.test_mode,rx_level=item.rx_level,metric_type="BLER",metric_value=bler,result=result,status=status,run_id=self.run_id,data_source=self.data_source,bw=item.bw,global_cable_loss=float(self.config.cable_loss),channel_loss=float(item.loss_db),total_loss=total_loss,instrument_level=instrument_level,packet_count=int(self.config.packet_count),bler_threshold=float(self.config.bler_threshold),sensitivity_upper=float(self.config.sensitivity_upper),attempt=attempt,scan_phase=phase,error_message=error_message,scene=item.scene)
     def _resolve_data_source(self)->str:
         for attribute in ("last_measurement_source","data_source"):
             value=getattr(self.instrument,attribute,"")

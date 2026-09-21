@@ -477,18 +477,21 @@ class LeftPanel(QScrollArea):
 
         mode_layout = QHBoxLayout()
         mode_layout.addWidget(QLabel("测试模式："))
+        self.default_mode_radio = QRadioButton("默认")
         self.single_main_radio = QRadioButton("单主")
         self.single_div_radio = QRadioButton("单分")
         self.main_div_radio = QRadioButton("主分集")
-        self.single_main_radio.setChecked(True)
+        self.default_mode_radio.setChecked(True)
         self.mode_group = QButtonGroup(self)
-        for radio in (self.single_main_radio, self.single_div_radio, self.main_div_radio):
+        for radio in (self.default_mode_radio, self.single_main_radio, self.single_div_radio, self.main_div_radio):
             self.mode_group.addButton(radio)
             mode_layout.addWidget(radio)
         mode_layout.addStretch(1)
 
         trace_layout = QGridLayout()
+        self.operator_edit.setText("test")
         self.operator_edit.setPlaceholderText("测试人员")
+        self.dut_serial_edit.setText("test")
         self.dut_serial_edit.setPlaceholderText("DUT 序列号/资产号")
         trace_layout.addWidget(QLabel("测试人员："), 0, 0)
         trace_layout.addWidget(self.operator_edit, 0, 1)
@@ -507,10 +510,40 @@ class LeftPanel(QScrollArea):
         layout.setContentsMargins(8, 14, 8, 8)
         layout.setSpacing(8)
 
-        label = QLabel("LTE 灵敏度扫描（粗扫 + 细扫 + 失败重试）")
-        label.setWordWrap(True)
-        layout.addWidget(label)
+        self.scene_checkboxes: dict[str, QCheckBox] = {}
+        grid = QGridLayout()
+        scenes = [
+            "灭屏", "亮屏", "音乐", "马达", "前置主摄", "后置主摄",
+            "视频", "游戏高负载", "手电筒", "白屏", "动态壁纸", "录音",
+            "镜子", "指南针", "环境光",
+        ]
+        for index, name in enumerate(scenes):
+            checkbox = QCheckBox(name)
+            checkbox.setChecked(name == "灭屏")
+            self.scene_checkboxes[name] = checkbox
+            grid.addWidget(checkbox, index // 2, index % 2)
+        layout.addLayout(grid)
+
+        scene_form = QFormLayout()
+        self.scene_package_edit = QLineEdit("com.yunfei.autotestscene")
+        self.scene_settle_spin = self._double_spin(3.0, " s", 0.0, 60.0)
+        self.scene_duration_spin = self._spin(0, 0, 86400, " s")
+        self.scene_particles_spin = self._spin(250, 20, 5000)
+        self.scene_cpu_threads_spin = self._spin(2, 0, 32)
+        self.scene_audio_checkbox = QCheckBox("启用")
+        self.scene_vibration_checkbox = QCheckBox("启用")
+        scene_form.addRow("场景App包名：", self.scene_package_edit)
+        scene_form.addRow("场景稳定等待：", self.scene_settle_spin)
+        scene_form.addRow("场景持续时间：", self.scene_duration_spin)
+        scene_form.addRow("粒子数：", self.scene_particles_spin)
+        scene_form.addRow("CPU线程：", self.scene_cpu_threads_spin)
+        scene_form.addRow("场景音频：", self.scene_audio_checkbox)
+        scene_form.addRow("场景振动：", self.scene_vibration_checkbox)
+        layout.addLayout(scene_form)
         return group
+
+    def _selected_scenes(self) -> list[str]:
+        return [name for name, checkbox in self.scene_checkboxes.items() if checkbox.isChecked()]
 
     def _create_control_group(self) -> QGroupBox:
         group = QGroupBox("测试控制")
@@ -1086,7 +1119,7 @@ class LeftPanel(QScrollArea):
 
     def _current_test_mode(self) -> str:
         checked = self.mode_group.checkedButton()
-        return checked.text() if checked else "单主"
+        return checked.text() if checked else "默认"
 
     def _selected_lte_test_items(self) -> list[str]:
         return [
@@ -1168,8 +1201,17 @@ class LeftPanel(QScrollArea):
             custom_channels=[],
             lte_test_items=self._selected_lte_test_items(),
             test_mode=self._current_test_mode(),
+            scenes=self._selected_scenes(),
             data=data,
             com_port=com_port,
+            scene_device_id=self.device_combo.currentText().strip(),
+            scene_package_name=self.scene_package_edit.text().strip() or "com.yunfei.autotestscene",
+            scene_settle_time=self.scene_settle_spin.value(),
+            scene_duration=self.scene_duration_spin.value(),
+            scene_particles=self.scene_particles_spin.value(),
+            scene_cpu_threads=self.scene_cpu_threads_spin.value(),
+            scene_audio=self.scene_audio_checkbox.isChecked(),
+            scene_vibration=self.scene_vibration_checkbox.isChecked(),
         )
 
     def _validate_lte_channel_config(self, config: LteTestConfig) -> bool:
@@ -1195,6 +1237,9 @@ class LeftPanel(QScrollArea):
                 QMessageBox.warning(self, "参数错误", f"{row.get('band', '')} Excel 线损不能为负数")
                 return False
 
+        if not config.scenes:
+            QMessageBox.warning(self, "提示", "请至少选择一个测试场景")
+            return False
         if not config.selected_bands:
             QMessageBox.warning(self, "提示", "请至少选择一个 Band")
             return False
