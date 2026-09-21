@@ -299,10 +299,8 @@ class LeftPanel(QScrollArea):
             lower_limit_spin = QDoubleSpinBox()
             lower_limit_spin.setRange(-200.0, 50.0)
             lower_limit_spin.setDecimals(1)
-            lower_limit_spin.setSuffix(" dBm")
             lower_limit_spin.setValue(lower_limits[band])
-            lower_limit_spin.setToolTip("设置后优先使用此下限；清空后使用仪表配置的灵敏度最终值")
-            lower_limit_spin.lineEdit().setClearButtonEnabled(True)
+            lower_limit_spin.setToolTip("设置后优先使用此下限；未设置时使用仪表配置的灵敏度最终值")
 
             self.wifi_band_checkboxes[band] = checkbox
             self.wifi_channel_edits[band] = channel_edit
