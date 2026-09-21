@@ -46,6 +46,30 @@ class LteTestConfig:
 
 
 @dataclass
+class WcdmaTestConfig:
+    cable_loss: float = 35.0
+    initial_level: float = -70.1
+    connection_level: float = -60.0
+    max_step: float = 0.5
+    min_step: float = 0.2
+    packet_count: int = 500
+    fast_packet_count: int = 50
+    ber_threshold: float = 0.1
+    power: float = -70.0
+    com_port: int = 1
+    selected_bands: list[int] = field(default_factory=list)
+    scenes: list[str] = field(default_factory=lambda: ["灭屏"])
+    scene_device_id: str = ""
+    scene_package_name: str = "com.yunfei.autotestscene"
+    scene_settle_time: float = 3.0
+    scene_duration: int = 0
+    scene_particles: int = 250
+    scene_cpu_threads: int = 2
+    scene_audio: bool = False
+    scene_vibration: bool = False
+
+
+@dataclass
 class TestItem:
     index: int
     mode: str
