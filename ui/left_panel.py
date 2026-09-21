@@ -195,10 +195,7 @@ class LeftPanel(QScrollArea):
 
         tabs = QTabWidget()
         tabs.addTab(self._create_lte_tab(), "LTE")
-        tabs.addTab(
-            self._create_placeholder_tab(["仪表配置", "信道选择", "制式/速率配置"]),
-            "WiFi",
-        )
+        tabs.addTab(self._create_wifi_tab(), "WiFi")
         tabs.addTab(
             self._create_placeholder_tab(["仪表配置", "信道选择", "Band 配置"]),
             "WCDMA",
@@ -207,9 +204,9 @@ class LeftPanel(QScrollArea):
             self._create_placeholder_tab(["仪表配置", "信道选择", "Band 配置"]),
             "GSM",
         )
-        for index in range(1, tabs.count()):
+        for index in range(2, tabs.count()):
             tabs.setTabEnabled(index, False)
-            tabs.setTabToolTip(index, "当前商业候选版本仅开放 LTE")
+            tabs.setTabToolTip(index, "当前尚未开放")
 
         layout.addWidget(tabs)
         return group
@@ -225,6 +222,76 @@ class LeftPanel(QScrollArea):
         layout.addWidget(self._create_lte_band_group())
         layout.addStretch(1)
         return tab
+
+    def _create_wifi_tab(self) -> QWidget:
+        """WiFi Phase 1: UI only. Test flow is intentionally not connected yet."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+        layout.addWidget(self._create_wifi_instrument_group())
+        layout.addWidget(self._create_wifi_band_group())
+
+        hint = QLabel("第一阶段仅完成 WiFi 界面；场景选择、手机设置、仪表连接和测试控制复用 LTE 通用区域。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        layout.addStretch(1)
+        return tab
+
+    def _create_wifi_instrument_group(self) -> QGroupBox:
+        group = QGroupBox("仪表配置")
+        form = QFormLayout(group)
+        form.setContentsMargins(8, 14, 8, 8)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+
+        self.wifi_cable_loss_spin = self._double_spin(35.0, " dB", 0.0, 100.0)
+        self.wifi_initial_level_spin = self._double_spin(-70.0, " dBm", -200.0, 50.0)
+        self.wifi_final_level_spin = self._double_spin(-120.0, " dBm", -200.0, 50.0)
+        self.wifi_sensitivity_upper_spin = self._double_spin(-70.0, " dBm", -200.0, 50.0)
+        self.wifi_packet_count_spin = self._spin(1000, 1, 999999)
+        self.wifi_packet_interval_spin = self._spin(10, 0, 60000, " ms")
+        self.wifi_power_spin = self._double_spin(0.0, " dBm", -100.0, 50.0)
+        self.wifi_com_port_combo = QComboBox()
+        self.wifi_com_port_combo.addItems(["COM1", "COM2", "COM3", "COM4"])
+
+        form.addRow("线损：", self.wifi_cable_loss_spin)
+        form.addRow("灵敏度初始值：", self.wifi_initial_level_spin)
+        form.addRow("灵敏度最终值：", self.wifi_final_level_spin)
+        form.addRow("灵敏度上限：", self.wifi_sensitivity_upper_spin)
+        form.addRow("测试包个数：", self.wifi_packet_count_spin)
+        form.addRow("发包间隔：", self.wifi_packet_interval_spin)
+        form.addRow("功率设置：", self.wifi_power_spin)
+        form.addRow("COM口：", self.wifi_com_port_combo)
+        return group
+
+    def _create_wifi_band_group(self) -> QGroupBox:
+        group = QGroupBox("Band 配置")
+        grid = QGridLayout(group)
+        grid.setContentsMargins(8, 14, 8, 8)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+
+        self.wifi_band_checkboxes: dict[str, QCheckBox] = {}
+        self.wifi_channel_edits: dict[str, QLineEdit] = {}
+        defaults = {"11A": "36 40 44 48", "11B": "1 6 11", "11G": "1 6 11"}
+        for row, band in enumerate(("11A", "11B", "11G")):
+            checkbox = QCheckBox(band)
+            channel_edit = QLineEdit(defaults[band])
+            channel_edit.setPlaceholderText("支持空格、逗号或混合输入，例如 1 6,11")
+            self.wifi_band_checkboxes[band] = checkbox
+            self.wifi_channel_edits[band] = channel_edit
+            grid.addWidget(checkbox, row, 0)
+            grid.addWidget(QLabel("Channel："), row, 1)
+            grid.addWidget(channel_edit, row, 2)
+        grid.setColumnStretch(2, 1)
+        return group
+
+    @staticmethod
+    def _parse_wifi_channels(text: str) -> list[int]:
+        """Accept spaces, Chinese/English commas, or any mixture of them."""
+        tokens = re.split(r"[\s,，]+", str(text).strip())
+        return [int(token) for token in tokens if token]
 
     def _create_lte_instrument_group(self) -> QGroupBox:
         group = QGroupBox("仪表配置")
