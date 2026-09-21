@@ -40,7 +40,7 @@ from core.lte_channel_config import (
     default_lte_channel_config_path,
 )
 from core.fake_cmw500 import FakeCMW500
-from core.models import LteTestConfig
+from core.models import LteTestConfig, WcdmaTestConfig
 from core.paths import ensure_user_data_dir, resource_path
 from core.scpi_template import ScpiTemplateManager
 from core.serial_config import SerialConfigManager
@@ -194,6 +194,7 @@ class LeftPanel(QScrollArea):
         layout.setContentsMargins(8, 14, 8, 8)
 
         tabs = QTabWidget()
+        self.standard_tabs = tabs
         tabs.addTab(self._create_lte_tab(), "LTE")
         tabs.addTab(self._create_wifi_tab(), "WiFi")
         tabs.addTab(self._create_wcdma_tab(), "WCDMA")
@@ -362,6 +363,7 @@ class LeftPanel(QScrollArea):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
         self.wcdma_cable_loss_spin = self._double_spin(35.0, " dB", 0.0, 100.0)
+        self.wcdma_com_port_combo = self._combo_with_values(["COM1", "COM2", "COM3", "COM4"], "COM1")
         self.wcdma_initial_level_spin = self._double_spin(-70.1, " dBm", -200.0, 50.0)
         self.wcdma_connection_level_spin = self._double_spin(-60.0, " dBm", -200.0, 50.0)
         self.wcdma_max_step_combo = self._combo_with_values(
@@ -379,8 +381,10 @@ class LeftPanel(QScrollArea):
         self.wcdma_min_step_combo = self._combo_with_values(
             ["0.1", "0.2", "0.3", "0.4", "0.5"], "0.2"
         )
+        self.wcdma_ber_threshold_spin = self._double_spin(0.1, "", 0.0, 100.0)
 
         form.addRow("线损：", self.wcdma_cable_loss_spin)
+        form.addRow("COM口：", self.wcdma_com_port_combo)
         form.addRow("灵敏度初始值：", self.wcdma_initial_level_spin)
         form.addRow("灵敏度连接值：", self.wcdma_connection_level_spin)
         form.addRow("最大步长：", self.wcdma_max_step_combo)
@@ -388,6 +392,7 @@ class LeftPanel(QScrollArea):
         form.addRow("功率：", self.wcdma_power_spin)
         form.addRow("快速浏览包个数：", self.wcdma_fast_browse_count_combo)
         form.addRow("最小步长：", self.wcdma_min_step_combo)
+        form.addRow("BER门限：", self.wcdma_ber_threshold_spin)
         return group
 
     def _create_wcdma_band_group(self) -> QGroupBox:
@@ -1383,6 +1388,31 @@ class LeftPanel(QScrollArea):
             scenes=self._selected_scenes(),
             data=data,
             com_port=com_port,
+            scene_device_id=self.device_combo.currentText().strip(),
+            scene_package_name=self.scene_package_edit.text().strip() or "com.yunfei.autotestscene",
+            scene_settle_time=self.scene_settle_spin.value(),
+            scene_duration=self.scene_duration_spin.value(),
+            scene_particles=self.scene_particles_spin.value(),
+            scene_cpu_threads=self.scene_cpu_threads_spin.value(),
+            scene_audio=self.scene_audio_checkbox.isChecked(),
+            scene_vibration=self.scene_vibration_checkbox.isChecked(),
+        )
+
+    def collect_wcdma_config(self) -> WcdmaTestConfig:
+        match = re.fullmatch(r"COM([1-4])", self.wcdma_com_port_combo.currentText().strip().upper())
+        return WcdmaTestConfig(
+            cable_loss=self.wcdma_cable_loss_spin.value(),
+            initial_level=self.wcdma_initial_level_spin.value(),
+            connection_level=self.wcdma_connection_level_spin.value(),
+            max_step=float(self.wcdma_max_step_combo.currentText()),
+            min_step=float(self.wcdma_min_step_combo.currentText()),
+            packet_count=int(self.wcdma_packet_count_combo.currentText()),
+            fast_packet_count=int(self.wcdma_fast_browse_count_combo.currentText()),
+            ber_threshold=self.wcdma_ber_threshold_spin.value(),
+            power=self.wcdma_power_spin.value(),
+            com_port=int(match.group(1)) if match else 1,
+            selected_bands=[band for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()],
+            scenes=self._selected_scenes(),
             scene_device_id=self.device_combo.currentText().strip(),
             scene_package_name=self.scene_package_edit.text().strip() or "com.yunfei.autotestscene",
             scene_settle_time=self.scene_settle_spin.value(),
