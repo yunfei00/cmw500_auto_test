@@ -196,17 +196,14 @@ class LeftPanel(QScrollArea):
         tabs = QTabWidget()
         tabs.addTab(self._create_lte_tab(), "LTE")
         tabs.addTab(self._create_wifi_tab(), "WiFi")
-        tabs.addTab(
-            self._create_placeholder_tab(["仪表配置", "信道选择", "Band 配置"]),
-            "WCDMA",
-        )
+        tabs.addTab(self._create_wcdma_tab(), "WCDMA")
         tabs.addTab(
             self._create_placeholder_tab(["仪表配置", "信道选择", "Band 配置"]),
             "GSM",
         )
-        for index in range(2, tabs.count()):
-            tabs.setTabEnabled(index, False)
-            tabs.setTabToolTip(index, "当前尚未开放")
+        # LTE / WiFi / WCDMA are available; GSM remains a placeholder.
+        tabs.setTabEnabled(3, False)
+        tabs.setTabToolTip(3, "当前尚未开放")
 
         layout.addWidget(tabs)
         return group
@@ -334,6 +331,79 @@ class LeftPanel(QScrollArea):
         """Accept spaces, Chinese/English commas, or any mixture of them."""
         tokens = re.split(r"[\s,，]+", str(text).strip())
         return [int(token) for token in tokens if token]
+
+    def _create_wcdma_tab(self) -> QWidget:
+        """WCDMA Phase 1: UI only. Common scene/file/device controls are reused."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+        layout.addWidget(self._create_wcdma_instrument_group())
+        layout.addWidget(self._create_wcdma_band_group())
+
+        hint = QLabel("第一阶段仅完成 WCDMA 界面；场景、配置文件、手机设置、仪表连接和测试控制复用通用区域。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        layout.addStretch(1)
+        return tab
+
+    @staticmethod
+    def _combo_with_values(values: list[str], default: str) -> QComboBox:
+        combo = QComboBox()
+        combo.addItems(values)
+        combo.setCurrentText(default)
+        return combo
+
+    def _create_wcdma_instrument_group(self) -> QGroupBox:
+        group = QGroupBox("仪表配置")
+        form = QFormLayout(group)
+        form.setContentsMargins(8, 14, 8, 8)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+
+        self.wcdma_cable_loss_spin = self._double_spin(35.0, " dB", 0.0, 100.0)
+        self.wcdma_initial_level_spin = self._double_spin(-70.1, " dBm", -200.0, 50.0)
+        self.wcdma_connection_level_spin = self._double_spin(-60.0, " dBm", -200.0, 50.0)
+        self.wcdma_max_step_combo = self._combo_with_values(
+            ["0.5", "1", "1.5", "2"], "0.5"
+        )
+        packet_counts = [str(value) for value in range(100, 1001, 100)]
+        packet_counts.extend(str(value) for value in range(2000, 10001, 1000))
+        self.wcdma_packet_count_combo = self._combo_with_values(packet_counts, "1000")
+        self.wcdma_power_spin = self._double_spin(-70.0, " dBm", -200.0, 50.0)
+        browse_counts = [str(value) for value in range(1, 101)]
+        browse_counts.extend(["200", "300"])
+        self.wcdma_fast_browse_count_combo = self._combo_with_values(
+            browse_counts, "50"
+        )
+        self.wcdma_min_step_combo = self._combo_with_values(
+            ["0.1", "0.2", "0.3", "0.4", "0.5"], "0.2"
+        )
+
+        form.addRow("线损：", self.wcdma_cable_loss_spin)
+        form.addRow("灵敏度初始值：", self.wcdma_initial_level_spin)
+        form.addRow("灵敏度连接值：", self.wcdma_connection_level_spin)
+        form.addRow("最大步长：", self.wcdma_max_step_combo)
+        form.addRow("测试包个数：", self.wcdma_packet_count_combo)
+        form.addRow("功率：", self.wcdma_power_spin)
+        form.addRow("快速浏览包个数：", self.wcdma_fast_browse_count_combo)
+        form.addRow("最小步长：", self.wcdma_min_step_combo)
+        return group
+
+    def _create_wcdma_band_group(self) -> QGroupBox:
+        group = QGroupBox("Band 配置")
+        grid = QGridLayout(group)
+        grid.setContentsMargins(8, 14, 8, 8)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+
+        self.wcdma_band_checkboxes: dict[int, QCheckBox] = {}
+        bands = [1, 2, 4, 5, 6, 8, 19]
+        for index, band in enumerate(bands):
+            checkbox = QCheckBox(f"Band {band}")
+            self.wcdma_band_checkboxes[band] = checkbox
+            grid.addWidget(checkbox, index // 4, index % 4)
+        return group
 
     def _create_lte_instrument_group(self) -> QGroupBox:
         group = QGroupBox("仪表配置")
