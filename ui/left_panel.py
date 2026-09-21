@@ -269,23 +269,62 @@ class LeftPanel(QScrollArea):
         group = QGroupBox("Band 配置")
         grid = QGridLayout(group)
         grid.setContentsMargins(8, 14, 8, 8)
-        grid.setHorizontalSpacing(10)
+        grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(8)
 
         self.wifi_band_checkboxes: dict[str, QCheckBox] = {}
         self.wifi_channel_edits: dict[str, QLineEdit] = {}
-        defaults = {"11A": "36 40 44 48", "11B": "1 6 11", "11G": "1 6 11"}
-        for row, band in enumerate(("11A", "11B", "11G")):
+        self.wifi_channel_type_combos: dict[str, QComboBox] = {}
+        self.wifi_band_lower_limit_spins: dict[str, QDoubleSpinBox] = {}
+
+        typical_channels = {
+            "802.11a": [36, 44, 60, 64, 149, 153, 165],
+            "802.11b": [1, 2, 6, 7, 10, 11, 13],
+            "802.11g": [1, 2, 6, 7, 10, 11, 13],
+        }
+        all_channels = {
+            "802.11a": [36, 40, 44, 48, 52, 56, 60, 64, 149, 153, 157, 161, 165],
+            "802.11b": list(range(1, 14)),
+            "802.11g": list(range(1, 14)),
+        }
+        lower_limits = {"802.11a": -75.0, "802.11b": -90.0, "802.11g": -85.0}
+        self.wifi_channel_presets = {"典型": typical_channels, "全信道": all_channels}
+
+        for row, band in enumerate(("802.11a", "802.11b", "802.11g")):
             checkbox = QCheckBox(band)
-            channel_edit = QLineEdit(defaults[band])
-            channel_edit.setPlaceholderText("支持空格、逗号或混合输入，例如 1 6,11")
+            channel_edit = QLineEdit(" ".join(str(ch) for ch in typical_channels[band]))
+            channel_edit.setPlaceholderText("支持空格、逗号或混合输入")
+            channel_type_combo = QComboBox()
+            channel_type_combo.addItems(["典型", "全信道"])
+            lower_limit_spin = self._double_spin(lower_limits[band], " dBm", -200.0, 50.0)
+            lower_limit_spin.setSpecialValueText("使用仪表默认下限")
+
             self.wifi_band_checkboxes[band] = checkbox
             self.wifi_channel_edits[band] = channel_edit
+            self.wifi_channel_type_combos[band] = channel_type_combo
+            self.wifi_band_lower_limit_spins[band] = lower_limit_spin
+
+            channel_type_combo.currentTextChanged.connect(
+                lambda preset, current_band=band: self._apply_wifi_channel_preset(
+                    current_band, preset
+                )
+            )
+
             grid.addWidget(checkbox, row, 0)
             grid.addWidget(QLabel("Channel："), row, 1)
             grid.addWidget(channel_edit, row, 2)
+            grid.addWidget(channel_type_combo, row, 3)
+            grid.addWidget(QLabel("下限："), row, 4)
+            grid.addWidget(lower_limit_spin, row, 5)
+
         grid.setColumnStretch(2, 1)
         return group
+
+    def _apply_wifi_channel_preset(self, band: str, preset: str) -> None:
+        channels = self.wifi_channel_presets.get(preset, {}).get(band, [])
+        channel_edit = self.wifi_channel_edits.get(band)
+        if channel_edit is not None:
+            channel_edit.setText(" ".join(str(channel) for channel in channels))
 
     @staticmethod
     def _parse_wifi_channels(text: str) -> list[int]:
