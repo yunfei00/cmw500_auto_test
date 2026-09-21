@@ -403,11 +403,18 @@ class LeftPanel(QScrollArea):
         grid.setVerticalSpacing(8)
 
         self.wcdma_band_checkboxes: dict[int, QCheckBox] = {}
+        self.wcdma_channel_edits: dict[int, QLineEdit] = {}
         bands = [1, 2, 4, 5, 6, 8, 19]
         for index, band in enumerate(bands):
             checkbox = QCheckBox(f"Band {band}")
+            channel_edit = QLineEdit()
+            channel_edit.setPlaceholderText("下行 UARFCN，支持空格/逗号，例如 10562,10700,10838")
             self.wcdma_band_checkboxes[band] = checkbox
-            grid.addWidget(checkbox, index // 4, index % 4)
+            self.wcdma_channel_edits[band] = channel_edit
+            grid.addWidget(checkbox, index, 0)
+            grid.addWidget(QLabel("Channel："), index, 1)
+            grid.addWidget(channel_edit, index, 2)
+        grid.setColumnStretch(2, 1)
         return group
 
     def _create_lte_instrument_group(self) -> QGroupBox:
@@ -1412,6 +1419,7 @@ class LeftPanel(QScrollArea):
             power=self.wcdma_power_spin.value(),
             com_port=int(match.group(1)) if match else 1,
             selected_bands=[band for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()],
+            channels_by_band={band: self._parse_wifi_channels(self.wcdma_channel_edits[band].text()) for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()},
             scenes=self._selected_scenes(),
             scene_device_id=self.device_combo.currentText().strip(),
             scene_package_name=self.scene_package_edit.text().strip() or "com.yunfei.autotestscene",
@@ -1422,6 +1430,33 @@ class LeftPanel(QScrollArea):
             scene_audio=self.scene_audio_checkbox.isChecked(),
             scene_vibration=self.scene_vibration_checkbox.isChecked(),
         )
+
+    def _validate_wcdma_config(self, config: WcdmaTestConfig) -> bool:
+        if config.com_port not in {1, 2, 3, 4}:
+            QMessageBox.warning(self, "参数错误", "WCDMA COM 口仅支持 COM1～COM4")
+            return False
+        if config.cable_loss < 0 or config.max_step <= 0 or config.min_step <= 0:
+            QMessageBox.warning(self, "参数错误", "WCDMA 线损不能为负，步长必须大于 0")
+            return False
+        if config.max_step < config.min_step:
+            QMessageBox.warning(self, "参数错误", "WCDMA 最大步长不能小于最小步长")
+            return False
+        if not config.selected_bands:
+            QMessageBox.warning(self, "提示", "请至少选择一个 WCDMA Band")
+            return False
+        missing = [f"Band {band}" for band in config.selected_bands if not config.channels_by_band.get(band)]
+        if missing:
+            QMessageBox.warning(self, "提示", f"请填写下行 UARFCN：{', '.join(missing)}")
+            return False
+        if not config.scenes:
+            QMessageBox.warning(self, "提示", "请至少选择一个测试场景")
+            return False
+        if self.instrument_mode_combo.currentText() == "Real CMW500":
+            if not self.operator_edit.text().strip() or not self.dut_serial_edit.text().strip():
+                QMessageBox.warning(self, "追溯信息缺失", "Real CMW500 正式测试必须填写测试人员和 DUT 标识")
+                return False
+        self._save_calibration_metadata()
+        return True
 
     def _validate_lte_channel_config(self, config: LteTestConfig) -> bool:
         if config.start_level <= config.stop_level:
@@ -1555,8 +1590,18 @@ class LeftPanel(QScrollArea):
             self._log("WARNING", "后台设备操作尚未完成，不能开始测试")
             return
 
-        config = self.collect_lte_config()
-        if not self._validate_lte_channel_config(config):
+        standard = self.standard_tabs.tabText(self.standard_tabs.currentIndex())
+        if standard == "WiFi":
+            QMessageBox.information(self, "提示", "WiFi 当前仍为界面阶段，尚未接入测试流程")
+            return
+        if standard == "GSM":
+            return
+        is_wcdma = standard == "WCDMA"
+        config = self.collect_wcdma_config() if is_wcdma else self.collect_lte_config()
+        if is_wcdma:
+            if not self._validate_wcdma_config(config):
+                return
+        elif not self._validate_lte_channel_config(config):
             return
 
         if self.instrument_mode_combo.currentText() == "Fake":
@@ -1570,7 +1615,11 @@ class LeftPanel(QScrollArea):
             if answer != QMessageBox.StandardButton.Yes:
                 return
 
-        self._log_test_channel_summary(config)
+        if is_wcdma:
+            channel_text = "; ".join(f"B{band}: {config.channels_by_band.get(band, [])}" for band in config.selected_bands)
+            self._log("INFO", f"WCDMA 测试配置：COM{config.com_port}，线损={config.cable_loss:g} dB，{channel_text}")
+        else:
+            self._log_test_channel_summary(config)
 
         instrument = self._prepare_instrument_for_test()
         if not instrument:
@@ -1590,12 +1639,16 @@ class LeftPanel(QScrollArea):
             self._run_started_callback(dict(self.current_run))
 
         self.worker_thread = QThread(self)
-        self.worker = TestWorker(
-            config,
-            self.lte_channel_manager,
-            instrument,
-            run_id=self.current_run["run_id"],
-        )
+        if is_wcdma:
+            from core.wcdma_test_worker import WcdmaTestWorker
+            self.worker = WcdmaTestWorker(config, instrument, run_id=self.current_run["run_id"])
+        else:
+            self.worker = TestWorker(
+                config,
+                self.lte_channel_manager,
+                instrument,
+                run_id=self.current_run["run_id"],
+            )
         self.worker.moveToThread(self.worker_thread)
 
         self.worker_thread.started.connect(self.worker.run)
@@ -1618,8 +1671,8 @@ class LeftPanel(QScrollArea):
         self._log("INFO", f"测试开始时使用的仪表模式：{self.instrument_mode}")
         if isinstance(instrument, RealCMW500):
             if self.scpi_template_manager and self.scpi_template_manager.has_template():
-                self._log("INFO", "使用 CMW500 SCPI 模板执行 LTE 测试")
-        self._log("INFO", "开始测试")
+                self._log("INFO", "使用 CMW500 SCPI 模板执行 LTE 测试") if not is_wcdma else None
+        self._log("INFO", f"开始{'WCDMA' if is_wcdma else 'LTE'}测试")
         self.worker_thread.start()
 
     def _toggle_pause(self) -> None:
@@ -1738,8 +1791,8 @@ class LeftPanel(QScrollArea):
             self.instrument_status_label.setText("Fake 已就绪")
         self._log("INFO", "测试任务已结束")
 
-    def _build_run_metadata(self, config: LteTestConfig, instrument: InstrumentBase) -> dict:
-        channel_path = Path(self.lte_channel_manager.path)
+    def _build_run_metadata(self, config: LteTestConfig | WcdmaTestConfig, instrument: InstrumentBase) -> dict:
+        channel_path = Path(self.lte_channel_manager.path) if isinstance(config, LteTestConfig) else None
         template_path = Path(self.scpi_template_file_edit.text().strip()) if self.scpi_template_file_edit.text().strip() else None
         apk_path = Path(self.app_path_edit.text().strip()) if self.app_path_edit.text().strip() else None
         mode = "SIMULATION" if bool(getattr(instrument, "is_simulation", False)) else "REAL"
@@ -1764,7 +1817,7 @@ class LeftPanel(QScrollArea):
             "build_commit": APP_BUILD_COMMIT,
             "build_time": APP_BUILD_TIME,
             "build_dirty": APP_BUILD_DIRTY,
-            "channel_config_path": str(channel_path),
+            "channel_config_path": str(channel_path) if channel_path else "",
             "channel_config_sha256": self._file_sha256(channel_path),
             "scpi_template_path": str(template_path) if template_path else "",
             "scpi_template_sha256": self._file_sha256(template_path),
