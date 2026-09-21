@@ -296,8 +296,13 @@ class LeftPanel(QScrollArea):
             channel_edit.setPlaceholderText("支持空格、逗号或混合输入")
             channel_type_combo = QComboBox()
             channel_type_combo.addItems(["典型", "全信道"])
-            lower_limit_spin = self._double_spin(lower_limits[band], " dBm", -200.0, 50.0)
-            lower_limit_spin.setSpecialValueText("使用仪表默认下限")
+            lower_limit_spin = QDoubleSpinBox()
+            lower_limit_spin.setRange(-200.0, 50.0)
+            lower_limit_spin.setDecimals(1)
+            lower_limit_spin.setSuffix(" dBm")
+            lower_limit_spin.setValue(lower_limits[band])
+            lower_limit_spin.setToolTip("设置后优先使用此下限；清空后使用仪表配置的灵敏度最终值")
+            lower_limit_spin.lineEdit().setClearButtonEnabled(True)
 
             self.wifi_band_checkboxes[band] = checkbox
             self.wifi_channel_edits[band] = channel_edit
