@@ -369,9 +369,9 @@ class LeftPanel(QScrollArea):
         )
         packet_counts = [str(value) for value in range(100, 1001, 100)]
         packet_counts.extend(str(value) for value in range(2000, 10001, 1000))
-        self.wcdma_packet_count_combo = self._combo_with_values(packet_counts, "1000")
+        self.wcdma_packet_count_combo = self._combo_with_values(packet_counts, "500")
         self.wcdma_power_spin = self._double_spin(-70.0, " dBm", -200.0, 50.0)
-        browse_counts = [str(value) for value in range(1, 101)]
+        browse_counts = [str(value) for value in range(10, 101, 10)]
         browse_counts.extend(["200", "300"])
         self.wcdma_fast_browse_count_combo = self._combo_with_values(
             browse_counts, "50"
