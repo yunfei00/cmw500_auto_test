@@ -120,6 +120,49 @@ class FakeCMW500:
     def lte_cleanup(self) -> None:
         return None
 
+    def wcdma_prepare_run(self, com_port: int = 1, cable_loss: float = 35.0) -> None:
+        self._check_cancelled()
+        self.current_com_port = int(com_port)
+        self.cable_loss = float(cable_loss)
+
+    def wcdma_set_band(self, band: int | str) -> None:
+        self._check_cancelled()
+        self.band = f"B{int(str(band).upper().replace('BAND', '').replace('B', ''))}"
+
+    def wcdma_set_power(self, power: float) -> None:
+        self.set_rx_level(float(power))
+
+    def wcdma_set_channel(self, channel: int) -> None:
+        self._check_cancelled()
+        self.channel = int(channel)
+
+    def wcdma_cell_on(self, timeout: float = 20.0, interval: float = 0.2) -> bool:
+        self._check_cancelled()
+        return True
+
+    def wcdma_cell_off(self) -> None:
+        return None
+
+    def wcdma_connection_states(self) -> tuple[str, str]:
+        self._check_cancelled()
+        return "CEST", "ATT"
+
+    def wcdma_ensure_connected(self, timeout: float = 20.0, interval: float = 5.0) -> bool:
+        self._check_cancelled()
+        return True
+
+    def wcdma_measure_ber(self, packet_count: int, reconnect: bool = True) -> float:
+        self._check_cancelled()
+        self.packet_count = int(packet_count)
+        dut_level = self.rx_level - self.cable_loss
+        if dut_level >= -95:
+            ber = random.uniform(0.0001, 0.01)
+        elif dut_level >= -105:
+            ber = random.uniform(0.01, 0.12)
+        else:
+            ber = random.uniform(0.12, 0.5)
+        return round(ber, 4)
+
     def set_cancel_checker(self, checker: Callable[[], bool] | None) -> None:
         self._cancel_checker = checker
 
