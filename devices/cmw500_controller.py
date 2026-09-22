@@ -255,11 +255,20 @@ class RealCMW500(InstrumentBase):
     def wcdma_cell_on(self, timeout: float = 20.0, interval: float = 0.2) -> bool:
         self._execute_operation("write", "SOURce:WCDMa:SIGN:CELL ON", "wcdma.cell_on")
         deadline = time.monotonic() + max(0.0, float(timeout))
+        last_state = ""
         while True:
-            state = str(self._execute_operation("query", "SOURce:WCDMa:SIGN:CELL:STATe?", "wcdma.cell_state") or "").strip().upper()
+            raw_state = self._execute_operation("query", "SOURce:WCDMa:SIGN:CELL:STATe?", "wcdma.cell_state")
+            state = str(raw_state or "").strip().upper()
+            last_state = state
+            self._append_trace("wcdma.cell_on.debug", "state", "CELL_STATE", raw_state, True, f"normalized={state!r}")
+            if state in {"ON", "ADJ"}:
+                self.last_warning = ""
+                return True
             if state != "PEND":
-                return state in {"ON", "ADJ"}
+                self.last_warning = f"WCDMA Cell ON 返回非预期状态：raw={raw_state!r}, normalized={state!r}"
+                return False
             if time.monotonic() >= deadline:
+                self.last_warning = f"WCDMA Cell ON 超时：最后状态={last_state or '-'}"
                 return False
             self._sleep_cancelable(min(float(interval), max(deadline - time.monotonic(), 0.0)))
 
@@ -273,14 +282,18 @@ class RealCMW500(InstrumentBase):
 
     def wcdma_ensure_connected(self, timeout: float = 20.0, interval: float = 5.0) -> bool:
         deadline = time.monotonic() + max(0.0, float(timeout))
+        attempt = 0
         while True:
+            attempt += 1
             cs, ps = self.wcdma_connection_states()
+            self._append_trace("wcdma.connection.debug", "state", "CS_PS_STATE", f"CS={cs},PS={ps}", True, f"poll={attempt}")
             if cs == "CEST" and ps in {"ATT", "ON"}:
+                self.last_warning = ""
                 return True
             if cs == "REG":
                 self._execute_operation("write", "CALL:WCDMa:SIGN:CSWitched:ACTion CONNect", "wcdma.cs_connect")
             if time.monotonic() >= deadline:
-                self.last_warning = f"WCDMA 连接超时，最后状态 CS={cs or '-'}, PS={ps or '-'}"
+                self.last_warning = f"WCDMA 连接超时，最后状态 CS={cs or '-'}, PS={ps or '-'}，轮询次数={attempt}"
                 return False
             self._sleep_cancelable(min(float(interval), max(deadline - time.monotonic(), 0.0)))
 
