@@ -58,6 +58,7 @@ class WcdmaTestConfig:
     power: float = -70.0
     com_port: int = 1
     selected_bands: list[int] = field(default_factory=list)
+    channel_mode: str = "三信道"
     channels_by_band: dict[int, list[int]] = field(default_factory=dict)
     scenes: list[str] = field(default_factory=lambda: ["灭屏"])
     scene_device_id: str = ""
