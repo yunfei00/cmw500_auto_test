@@ -86,6 +86,8 @@ class LeftPanel(QScrollArea):
     LAST_VISA_RESOURCE_KEY = "instrument/last_visa_resource"
     CALIBRATION_ID_KEY = "instrument/calibration_id"
     CALIBRATION_DUE_KEY = "instrument/calibration_due_date"
+    LAST_STANDARD_TAB_KEY = "ui/last_standard_tab"
+    WCDMA_SETTINGS_PREFIX = "wcdma"
 
     def __init__(self) -> None:
         super().__init__()
@@ -169,6 +171,8 @@ class LeftPanel(QScrollArea):
         self._restore_calibration_metadata()
         self._init_lte_channel_config()
         self._init_default_scpi_template()
+        self._restore_wcdma_settings()
+        self._restore_last_standard_tab()
 
     def set_logger(self, logger: LogCallback) -> None:
         self._logger = logger
@@ -206,6 +210,7 @@ class LeftPanel(QScrollArea):
         # LTE / WiFi / WCDMA are available; GSM remains a placeholder.
         tabs.setTabEnabled(3, False)
         tabs.setTabToolTip(3, "当前尚未开放")
+        tabs.currentChanged.connect(self._save_last_standard_tab)
 
         layout.addWidget(tabs)
         return group
@@ -404,6 +409,12 @@ class LeftPanel(QScrollArea):
         mode_row.addWidget(QLabel("信道模式："))
         self.wcdma_channel_mode_combo = self._combo_with_values(["固定信道", "遍历"], "固定信道")
         mode_row.addWidget(self.wcdma_channel_mode_combo)
+        save_button = QPushButton("保存配置")
+        reset_button = QPushButton("恢复默认")
+        save_button.clicked.connect(self._save_wcdma_settings)
+        reset_button.clicked.connect(self._reset_wcdma_settings)
+        mode_row.addWidget(save_button)
+        mode_row.addWidget(reset_button)
         mode_row.addStretch(1)
         layout.addLayout(mode_row)
 
@@ -473,6 +484,53 @@ class LeftPanel(QScrollArea):
         self.wcdma_channel_mode_combo.currentIndexChanged.connect(self.wcdma_channel_mode_stack.setCurrentIndex)
         self.wcdma_channel_mode_stack.setCurrentIndex(self.wcdma_channel_mode_combo.currentIndex())
         return group
+
+    def _save_last_standard_tab(self, index: int) -> None:
+        self.settings.setValue(self.LAST_STANDARD_TAB_KEY, int(index))
+
+    def _restore_last_standard_tab(self) -> None:
+        index = int(self.settings.value(self.LAST_STANDARD_TAB_KEY, 0))
+        if 0 <= index < self.standard_tabs.count() and self.standard_tabs.isTabEnabled(index):
+            self.standard_tabs.setCurrentIndex(index)
+
+    def _save_wcdma_settings(self) -> None:
+        prefix = self.WCDMA_SETTINGS_PREFIX
+        self.settings.setValue(f"{prefix}/channel_mode", self.wcdma_channel_mode_combo.currentText())
+        for band in WCDMA_BAND_PLANS:
+            self.settings.setValue(f"{prefix}/band/{band}/selected", self.wcdma_band_checkboxes[band].isChecked())
+            self.settings.setValue(f"{prefix}/band/{band}/begin", self.wcdma_begin_edits[band].text().strip())
+            self.settings.setValue(f"{prefix}/band/{band}/end", self.wcdma_end_edits[band].text().strip())
+            self.settings.setValue(f"{prefix}/band/{band}/step", self.wcdma_step_edits[band].text().strip())
+            self.settings.setValue(f"{prefix}/band/{band}/bw", self.wcdma_bw_edits[band].text().strip())
+            self.settings.setValue(f"{prefix}/band/{band}/fixed", self.wcdma_fixed_channel_edits[band].text().strip())
+        self.settings.sync()
+        self._log("INFO", "WCDMA Band 配置已保存，下次启动自动加载")
+
+    def _restore_wcdma_settings(self) -> None:
+        prefix = self.WCDMA_SETTINGS_PREFIX
+        mode = str(self.settings.value(f"{prefix}/channel_mode", "固定信道"))
+        if mode in {"固定信道", "遍历"}:
+            self.wcdma_channel_mode_combo.setCurrentText(mode)
+        for band, plan in WCDMA_BAND_PLANS.items():
+            selected = str(self.settings.value(f"{prefix}/band/{band}/selected", "false")).lower() in {"1", "true", "yes"}
+            self.wcdma_band_checkboxes[band].setChecked(selected)
+            self.wcdma_begin_edits[band].setText(str(self.settings.value(f"{prefix}/band/{band}/begin", plan.begin)))
+            self.wcdma_end_edits[band].setText(str(self.settings.value(f"{prefix}/band/{band}/end", plan.end)))
+            self.wcdma_step_edits[band].setText(str(self.settings.value(f"{prefix}/band/{band}/step", plan.step)))
+            self.wcdma_bw_edits[band].setText(str(self.settings.value(f"{prefix}/band/{band}/bw", f"{plan.bw_mhz:g}")))
+            self.wcdma_fixed_channel_edits[band].setText(str(self.settings.value(f"{prefix}/band/{band}/fixed", " ".join(map(str, plan.three_channels)))))
+
+    def _reset_wcdma_settings(self) -> None:
+        self.wcdma_channel_mode_combo.setCurrentText("固定信道")
+        for band, plan in WCDMA_BAND_PLANS.items():
+            self.wcdma_band_checkboxes[band].setChecked(False)
+            self.wcdma_begin_edits[band].setText(str(plan.begin))
+            self.wcdma_end_edits[band].setText(str(plan.end))
+            self.wcdma_step_edits[band].setText(str(plan.step))
+            self.wcdma_bw_edits[band].setText(f"{plan.bw_mhz:g}")
+            self.wcdma_fixed_channel_edits[band].setText(" ".join(map(str, plan.three_channels)))
+        self._save_wcdma_settings()
+        self._log("INFO", "WCDMA Band 配置已恢复默认值")
 
     def _collect_wcdma_channels(self, band: int, mode: str) -> list[int]:
         if mode == "固定信道":
