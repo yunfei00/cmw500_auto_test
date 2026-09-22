@@ -41,6 +41,7 @@ from core.lte_channel_config import (
 )
 from core.fake_cmw500 import FakeCMW500
 from core.models import LteTestConfig, WcdmaTestConfig
+from core.wcdma_channel_config import WCDMA_BAND_PLANS, channels_for_band
 from core.paths import ensure_user_data_dir, resource_path
 from core.scpi_template import ScpiTemplateManager
 from core.serial_config import SerialConfigManager
@@ -397,24 +398,33 @@ class LeftPanel(QScrollArea):
 
     def _create_wcdma_band_group(self) -> QGroupBox:
         group = QGroupBox("Band 配置")
-        grid = QGridLayout(group)
-        grid.setContentsMargins(8, 14, 8, 8)
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(8, 14, 8, 8)
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("信道模式："))
+        self.wcdma_channel_mode_combo = self._combo_with_values(["三信道", "遍历"], "三信道")
+        mode_row.addWidget(self.wcdma_channel_mode_combo)
+        mode_row.addStretch(1)
+        layout.addLayout(mode_row)
+
+        grid = QGridLayout()
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(8)
-
-        self.wcdma_band_checkboxes: dict[int, QCheckBox] = {}
-        self.wcdma_channel_edits: dict[int, QLineEdit] = {}
-        bands = [1, 2, 4, 5, 6, 8, 19]
-        for index, band in enumerate(bands):
+        grid.addWidget(QLabel("Band"), 0, 0)
+        grid.addWidget(QLabel("三信道"), 0, 1)
+        grid.addWidget(QLabel("遍历 Begin / End / Step"), 0, 2)
+        grid.addWidget(QLabel("BW"), 0, 3)
+        self.wcdma_band_checkboxes = {}
+        for row, band in enumerate((1, 2, 4, 5, 6, 8, 19), start=1):
+            plan = WCDMA_BAND_PLANS[band]
             checkbox = QCheckBox(f"Band {band}")
-            channel_edit = QLineEdit()
-            channel_edit.setPlaceholderText("下行 UARFCN，支持空格/逗号，例如 10562,10700,10838")
             self.wcdma_band_checkboxes[band] = checkbox
-            self.wcdma_channel_edits[band] = channel_edit
-            grid.addWidget(checkbox, index, 0)
-            grid.addWidget(QLabel("Channel："), index, 1)
-            grid.addWidget(channel_edit, index, 2)
+            grid.addWidget(checkbox, row, 0)
+            grid.addWidget(QLabel(" / ".join(map(str, plan.three_channels))), row, 1)
+            grid.addWidget(QLabel(f"{plan.begin} / {plan.end} / {plan.step}"), row, 2)
+            grid.addWidget(QLabel(f"{plan.bw_mhz:g} MHz"), row, 3)
         grid.setColumnStretch(2, 1)
+        layout.addLayout(grid)
         return group
 
     def _create_lte_instrument_group(self) -> QGroupBox:
@@ -1419,7 +1429,8 @@ class LeftPanel(QScrollArea):
             power=self.wcdma_power_spin.value(),
             com_port=int(match.group(1)) if match else 1,
             selected_bands=[band for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()],
-            channels_by_band={band: self._parse_wifi_channels(self.wcdma_channel_edits[band].text()) for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()},
+            channel_mode=self.wcdma_channel_mode_combo.currentText(),
+            channels_by_band={band: channels_for_band(band, self.wcdma_channel_mode_combo.currentText()) for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()},
             scenes=self._selected_scenes(),
             scene_device_id=self.device_combo.currentText().strip(),
             scene_package_name=self.scene_package_edit.text().strip() or "com.yunfei.autotestscene",
@@ -1446,7 +1457,7 @@ class LeftPanel(QScrollArea):
             return False
         missing = [f"Band {band}" for band in config.selected_bands if not config.channels_by_band.get(band)]
         if missing:
-            QMessageBox.warning(self, "提示", f"请填写下行 UARFCN：{', '.join(missing)}")
+            QMessageBox.warning(self, "提示", f"WCDMA 信道配置为空：{', '.join(missing)}")
             return False
         if not config.scenes:
             QMessageBox.warning(self, "提示", "请至少选择一个测试场景")
