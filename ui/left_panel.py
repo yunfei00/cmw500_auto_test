@@ -407,28 +407,48 @@ class LeftPanel(QScrollArea):
         mode_row.addStretch(1)
         layout.addLayout(mode_row)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(8)
-        grid.addWidget(QLabel("Band"), 0, 0)
-        grid.addWidget(QLabel("遍历 Begin"), 0, 1)
-        grid.addWidget(QLabel("End"), 0, 2)
-        grid.addWidget(QLabel("Step"), 0, 3)
-        grid.addWidget(QLabel("BW(MHz)"), 0, 4)
-        grid.addWidget(QLabel("固定信道（空格间隔）"), 0, 5)
+        self.wcdma_channel_mode_stack = QStackedWidget()
         self.wcdma_band_checkboxes = {}
         self.wcdma_begin_edits = {}
         self.wcdma_end_edits = {}
         self.wcdma_step_edits = {}
         self.wcdma_bw_edits = {}
         self.wcdma_fixed_channel_edits = {}
+
+        fixed_page = QWidget()
+        fixed_grid = QGridLayout(fixed_page)
+        fixed_grid.setContentsMargins(0, 0, 0, 0)
+        fixed_grid.setHorizontalSpacing(8)
+        fixed_grid.setVerticalSpacing(8)
+        fixed_grid.addWidget(QLabel("Band"), 0, 0)
+        fixed_grid.addWidget(QLabel("BW(MHz)"), 0, 1)
+        fixed_grid.addWidget(QLabel("固定信道（空格间隔）"), 0, 2)
+
+        traversal_page = QWidget()
+        traversal_grid = QGridLayout(traversal_page)
+        traversal_grid.setContentsMargins(0, 0, 0, 0)
+        traversal_grid.setHorizontalSpacing(8)
+        traversal_grid.setVerticalSpacing(8)
+        traversal_grid.addWidget(QLabel("Band"), 0, 0)
+        traversal_grid.addWidget(QLabel("Begin"), 0, 1)
+        traversal_grid.addWidget(QLabel("End"), 0, 2)
+        traversal_grid.addWidget(QLabel("Step"), 0, 3)
+        traversal_grid.addWidget(QLabel("BW(MHz)"), 0, 4)
+
         for row, band in enumerate((1, 2, 4, 5, 6, 8, 19), start=1):
             plan = WCDMA_BAND_PLANS[band]
             checkbox = QCheckBox(f"Band {band}")
+            fixed_checkbox = QCheckBox(f"Band {band}")
+            fixed_checkbox.setChecked(checkbox.isChecked())
+            fixed_checkbox.toggled.connect(checkbox.setChecked)
+            checkbox.toggled.connect(fixed_checkbox.setChecked)
             begin_edit = QLineEdit(str(plan.begin))
             end_edit = QLineEdit(str(plan.end))
             step_edit = QLineEdit(str(plan.step))
             bw_edit = QLineEdit(f"{plan.bw_mhz:g}")
+            fixed_bw_edit = QLineEdit(f"{plan.bw_mhz:g}")
+            fixed_bw_edit.textChanged.connect(bw_edit.setText)
+            bw_edit.textChanged.connect(fixed_bw_edit.setText)
             fixed_edit = QLineEdit(" ".join(map(str, plan.three_channels)))
             fixed_edit.setPlaceholderText("例如 10562 10700 10838")
             self.wcdma_band_checkboxes[band] = checkbox
@@ -437,14 +457,21 @@ class LeftPanel(QScrollArea):
             self.wcdma_step_edits[band] = step_edit
             self.wcdma_bw_edits[band] = bw_edit
             self.wcdma_fixed_channel_edits[band] = fixed_edit
-            grid.addWidget(checkbox, row, 0)
-            grid.addWidget(begin_edit, row, 1)
-            grid.addWidget(end_edit, row, 2)
-            grid.addWidget(step_edit, row, 3)
-            grid.addWidget(bw_edit, row, 4)
-            grid.addWidget(fixed_edit, row, 5)
-        grid.setColumnStretch(5, 1)
-        layout.addLayout(grid)
+            fixed_grid.addWidget(fixed_checkbox, row, 0)
+            fixed_grid.addWidget(fixed_bw_edit, row, 1)
+            fixed_grid.addWidget(fixed_edit, row, 2)
+            traversal_grid.addWidget(checkbox, row, 0)
+            traversal_grid.addWidget(begin_edit, row, 1)
+            traversal_grid.addWidget(end_edit, row, 2)
+            traversal_grid.addWidget(step_edit, row, 3)
+            traversal_grid.addWidget(bw_edit, row, 4)
+
+        fixed_grid.setColumnStretch(2, 1)
+        self.wcdma_channel_mode_stack.addWidget(fixed_page)
+        self.wcdma_channel_mode_stack.addWidget(traversal_page)
+        layout.addWidget(self.wcdma_channel_mode_stack)
+        self.wcdma_channel_mode_combo.currentIndexChanged.connect(self.wcdma_channel_mode_stack.setCurrentIndex)
+        self.wcdma_channel_mode_stack.setCurrentIndex(self.wcdma_channel_mode_combo.currentIndex())
         return group
 
     def _collect_wcdma_channels(self, band: int, mode: str) -> list[int]:
