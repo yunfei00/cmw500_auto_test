@@ -41,7 +41,7 @@ from core.lte_channel_config import (
 )
 from core.fake_cmw500 import FakeCMW500
 from core.models import LteTestConfig, WcdmaTestConfig
-from core.wcdma_channel_config import WCDMA_BAND_PLANS, channels_for_band
+from core.wcdma_channel_config import WCDMA_BAND_PLANS
 from core.paths import ensure_user_data_dir, resource_path
 from core.scpi_template import ScpiTemplateManager
 from core.serial_config import SerialConfigManager
@@ -402,30 +402,63 @@ class LeftPanel(QScrollArea):
         layout.setContentsMargins(8, 14, 8, 8)
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("信道模式："))
-        self.wcdma_channel_mode_combo = self._combo_with_values(["三信道", "遍历"], "三信道")
+        self.wcdma_channel_mode_combo = self._combo_with_values(["固定信道", "遍历"], "固定信道")
         mode_row.addWidget(self.wcdma_channel_mode_combo)
         mode_row.addStretch(1)
         layout.addLayout(mode_row)
 
         grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
+        grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(8)
         grid.addWidget(QLabel("Band"), 0, 0)
-        grid.addWidget(QLabel("三信道"), 0, 1)
-        grid.addWidget(QLabel("遍历 Begin / End / Step"), 0, 2)
-        grid.addWidget(QLabel("BW"), 0, 3)
+        grid.addWidget(QLabel("遍历 Begin"), 0, 1)
+        grid.addWidget(QLabel("End"), 0, 2)
+        grid.addWidget(QLabel("Step"), 0, 3)
+        grid.addWidget(QLabel("BW(MHz)"), 0, 4)
+        grid.addWidget(QLabel("固定信道（空格间隔）"), 0, 5)
         self.wcdma_band_checkboxes = {}
+        self.wcdma_begin_edits = {}
+        self.wcdma_end_edits = {}
+        self.wcdma_step_edits = {}
+        self.wcdma_bw_edits = {}
+        self.wcdma_fixed_channel_edits = {}
         for row, band in enumerate((1, 2, 4, 5, 6, 8, 19), start=1):
             plan = WCDMA_BAND_PLANS[band]
             checkbox = QCheckBox(f"Band {band}")
+            begin_edit = QLineEdit(str(plan.begin))
+            end_edit = QLineEdit(str(plan.end))
+            step_edit = QLineEdit(str(plan.step))
+            bw_edit = QLineEdit(f"{plan.bw_mhz:g}")
+            fixed_edit = QLineEdit(" ".join(map(str, plan.three_channels)))
+            fixed_edit.setPlaceholderText("例如 10562 10700 10838")
             self.wcdma_band_checkboxes[band] = checkbox
+            self.wcdma_begin_edits[band] = begin_edit
+            self.wcdma_end_edits[band] = end_edit
+            self.wcdma_step_edits[band] = step_edit
+            self.wcdma_bw_edits[band] = bw_edit
+            self.wcdma_fixed_channel_edits[band] = fixed_edit
             grid.addWidget(checkbox, row, 0)
-            grid.addWidget(QLabel(" / ".join(map(str, plan.three_channels))), row, 1)
-            grid.addWidget(QLabel(f"{plan.begin} / {plan.end} / {plan.step}"), row, 2)
-            grid.addWidget(QLabel(f"{plan.bw_mhz:g} MHz"), row, 3)
-        grid.setColumnStretch(2, 1)
+            grid.addWidget(begin_edit, row, 1)
+            grid.addWidget(end_edit, row, 2)
+            grid.addWidget(step_edit, row, 3)
+            grid.addWidget(bw_edit, row, 4)
+            grid.addWidget(fixed_edit, row, 5)
+        grid.setColumnStretch(5, 1)
         layout.addLayout(grid)
         return group
+
+    def _collect_wcdma_channels(self, band: int, mode: str) -> list[int]:
+        if mode == "固定信道":
+            return self._parse_wifi_channels(self.wcdma_fixed_channel_edits[band].text())
+        begin = int(self.wcdma_begin_edits[band].text().strip())
+        end = int(self.wcdma_end_edits[band].text().strip())
+        step = int(self.wcdma_step_edits[band].text().strip())
+        if step <= 0 or end < begin:
+            raise ValueError(f"Band {band} 遍历参数无效")
+        channels = list(range(begin, end + 1, step))
+        if not channels or channels[-1] != end:
+            channels.append(end)
+        return channels
 
     def _create_lte_instrument_group(self) -> QGroupBox:
         group = QGroupBox("仪表配置")
@@ -1430,7 +1463,8 @@ class LeftPanel(QScrollArea):
             com_port=int(match.group(1)) if match else 1,
             selected_bands=[band for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()],
             channel_mode=self.wcdma_channel_mode_combo.currentText(),
-            channels_by_band={band: channels_for_band(band, self.wcdma_channel_mode_combo.currentText()) for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()},
+            channels_by_band={band: self._collect_wcdma_channels(band, self.wcdma_channel_mode_combo.currentText()) for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()},
+            bandwidths_by_band={band: float(self.wcdma_bw_edits[band].text().strip()) for band, checkbox in self.wcdma_band_checkboxes.items() if checkbox.isChecked()},
             scenes=self._selected_scenes(),
             scene_device_id=self.device_combo.currentText().strip(),
             scene_package_name=self.scene_package_edit.text().strip() or "com.yunfei.autotestscene",
