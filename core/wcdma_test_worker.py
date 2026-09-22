@@ -47,22 +47,33 @@ class WcdmaTestWorker(QObject):
             self._validate_config()
             self.set_state(TestState.PREPARING, "状态切换：PREPARING - 准备 WCDMA 测试")
             self._prepare_instrument()
+            self._debug("开始 WCDMA 公共初始化", com_port=self.config.com_port, cable_loss=self.config.cable_loss)
             self.instrument.wcdma_prepare_run(com_port=self.config.com_port, cable_loss=self.config.cable_loss)
+            self._debug("WCDMA 公共初始化完成")
             self._raise_if_stopped()
             total = sum(len(self.config.channels_by_band.get(b, [])) * len(self.config.scenes) for b in self.config.selected_bands)
             current = 0
             for band in self.config.selected_bands:
                 self._cooperate()
+                self._debug("设置 Band", band=band)
                 self.instrument.wcdma_set_band(band)
+                self._debug("设置 Band 初始功率", band=band, power=self.config.power)
                 self.instrument.wcdma_set_power(self.config.power)
                 for channel in self.config.channels_by_band.get(band, []):
                     self._cooperate()
+                    self._debug("设置 Channel", band=band, channel=channel)
                     self.instrument.wcdma_set_channel(channel)
+                    self._debug("设置建链电平", level=self.config.connection_level)
                     self.instrument.wcdma_set_power(self.config.connection_level)
+                    self._debug("准备 Cell ON", band=band, channel=channel)
                     if not self.instrument.wcdma_cell_on():
-                        raise RuntimeError(f"WCDMA B{band}/{channel} Cell ON 失败")
+                        self._dump_recent_scpi("Cell ON 失败")
+                        raise RuntimeError(f"WCDMA B{band}/{channel} Cell ON 失败；请查看前面的 SCPI 调试日志")
+                    self._debug("Cell ON 成功，开始检查 CS/PS 建链状态")
                     if not self.instrument.wcdma_ensure_connected():
+                        self._dump_recent_scpi("建链失败")
                         raise RuntimeError(f"WCDMA B{band}/{channel} 建链失败")
+                    self._debug("WCDMA 建链成功", band=band, channel=channel)
                     for scene in self.config.scenes:
                         current += 1
                         self._cooperate()
@@ -116,6 +127,18 @@ class WcdmaTestWorker(QObject):
             self.run_metadata.status = final.value
             self.run_metadata.end_time = local_now_iso()
             self.finished_signal.emit()
+
+    def _debug(self, message: str, **values: object) -> None:
+        detail = ", ".join(f"{key}={value}" for key, value in values.items())
+        self.log_signal.emit("DEBUG", f"[WCDMA-DEBUG] {message}" + (f" | {detail}" if detail else ""))
+
+    def _dump_recent_scpi(self, reason: str, limit: int = 30) -> None:
+        trace = getattr(self.instrument, "command_trace", None)
+        if not isinstance(trace, list):
+            return
+        self.log_signal.emit("DEBUG", f"[WCDMA-DEBUG] {reason}，最近 SCPI 记录：")
+        for item in trace[-limit:]:
+            self.log_signal.emit("DEBUG", "[SCPI] stage={stage} op={operation} cmd={command} response={response!r} success={success} error={error}".format(**item))
 
     def _validate_config(self) -> None:
         if not self.config.selected_bands: raise ValueError("WCDMA Band 为空")
