@@ -107,6 +107,31 @@ jobs:
             throw "Packaged executable smoke test failed with exit code $($process.ExitCode)."
           }
 
+      - name: Smoke test embedded VERSION resources
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $appDir = Resolve-Path "dist/CMW500AutoTest"
+          $versionPath = Join-Path $appDir "VERSION"
+          $buildInfoPath = Join-Path $appDir "BUILD_INFO.json"
+          $versionBackup = "$versionPath.external"
+          $buildInfoBackup = "$buildInfoPath.external"
+
+          Move-Item -LiteralPath $versionPath -Destination $versionBackup
+          Move-Item -LiteralPath $buildInfoPath -Destination $buildInfoBackup
+          try {
+            $process = Start-Process -FilePath (Join-Path $appDir "CMW500AutoTest.exe") `
+              -ArgumentList "--smoke-test" -WindowStyle Hidden -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "Embedded-resource smoke test failed with exit code $($process.ExitCode)."
+            }
+          }
+          finally {
+            Move-Item -LiteralPath $versionBackup -Destination $versionPath -Force
+            Move-Item -LiteralPath $buildInfoBackup -Destination $buildInfoPath -Force
+          }
+
       - name: Package release archive and checksum
         shell: pwsh
         run: uv run --locked --group build python scripts/package_release.py
