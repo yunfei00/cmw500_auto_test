@@ -18,15 +18,29 @@ _VALID_VERSION_PATTERN = re.compile(
 )
 
 
+def _frozen_resource_path(name: str) -> Path:
+    executable_resource = Path(sys.executable).resolve().parent / name
+    if executable_resource.is_file():
+        return executable_resource
+
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        bundled_resource = Path(bundle_root) / name
+        if bundled_resource.is_file():
+            return bundled_resource
+
+    return executable_resource
+
+
 def version_resource_path() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent / "VERSION"
+        return _frozen_resource_path("VERSION")
     return Path(__file__).resolve().parent / "VERSION"
 
 
 def build_info_resource_path() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent / "BUILD_INFO.json"
+        return _frozen_resource_path("BUILD_INFO.json")
     return Path(__file__).resolve().parent / "BUILD_INFO.json"
 
 
