@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
+import app_info
 from app_info import APP_VERSION, load_app_version, load_build_info
 from core.lte_channel_config import REQUIRED_HEADERS
 from scripts import build_windows, package_release
@@ -102,6 +103,29 @@ def test_app_version_comes_from_required_version_resource(tmp_path: Path) -> Non
     release_version.write_text("not-a-release\n", encoding="ascii")
     with pytest.raises(RuntimeError, match="Invalid VERSION"):
         load_app_version(release_version)
+
+
+def test_frozen_version_resources_fall_back_to_pyinstaller_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable_dir = tmp_path / "app"
+    bundle_dir = executable_dir / "_internal"
+    executable_dir.mkdir()
+    bundle_dir.mkdir()
+    (bundle_dir / "VERSION").write_text("v2.3.4\n", encoding="ascii")
+    (bundle_dir / "BUILD_INFO.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(app_info.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        app_info.sys,
+        "executable",
+        str(executable_dir / "CMW500AutoTest.exe"),
+    )
+    monkeypatch.setattr(app_info.sys, "_MEIPASS", str(bundle_dir), raising=False)
+
+    assert app_info.version_resource_path() == bundle_dir / "VERSION"
+    assert app_info.build_info_resource_path() == bundle_dir / "BUILD_INFO.json"
 
 
 def test_build_info_is_required_and_bound_to_app_version(tmp_path: Path) -> None:
