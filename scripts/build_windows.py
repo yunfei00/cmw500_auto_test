@@ -18,6 +18,7 @@ APP_DIST_DIR = DIST_DIR / APP_NAME
 APP_EXECUTABLE = APP_DIST_DIR / f"{APP_NAME}.exe"
 PYZ_ARCHIVE = BUILD_DIR / APP_NAME / "PYZ-00.pyz"
 VERSION_INFO_FILE = BUILD_DIR / "windows_version_info.txt"
+EMBEDDED_RESOURCE_DIR = BUILD_DIR / "embedded_runtime"
 
 RELEASE_VERSION_PATTERN = re.compile(
     r"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$"
@@ -73,7 +74,35 @@ def clean_previous_builds() -> None:
     remove_path(ROOT_DIR / f"{APP_NAME}.spec")
 
 
+def prepare_embedded_runtime_resources() -> tuple[Path, Path]:
+    EMBEDDED_RESOURCE_DIR.mkdir(parents=True, exist_ok=True)
+    version = resolve_runtime_version()
+    version_path = EMBEDDED_RESOURCE_DIR / "VERSION"
+    version_path.write_text(f"{version}\n", encoding="ascii", newline="\n")
+
+    commit, dirty = resolve_source_identity()
+    build_info_path = EMBEDDED_RESOURCE_DIR / "BUILD_INFO.json"
+    build_info_path.write_text(
+        json.dumps(
+            {
+                "version": version,
+                "commit": commit,
+                "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "dirty": dirty,
+            },
+            ensure_ascii=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="ascii",
+        newline="\n",
+    )
+    log("Prepared embedded VERSION and BUILD_INFO resources.")
+    return version_path, build_info_path
+
+
 def run_pyinstaller() -> None:
+    embedded_version_path, embedded_build_info_path = prepare_embedded_runtime_resources()
     version_info_file = write_windows_version_info()
     command = [
         sys.executable,
@@ -88,6 +117,10 @@ def run_pyinstaller() -> None:
         "pyvisa_py",
         "--version-file",
         str(version_info_file),
+        "--add-data",
+        f"{embedded_version_path}{os.pathsep}.",
+        "--add-data",
+        f"{embedded_build_info_path}{os.pathsep}.",
         "--name",
         APP_NAME,
         str(ROOT_DIR / "main.py"),
